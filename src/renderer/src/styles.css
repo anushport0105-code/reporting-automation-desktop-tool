@@ -1,0 +1,108 @@
+:root { color: #e7eceb; background: #111519; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-width: 0; min-height: 100%; margin: 0; }
+body { overflow: hidden; background: #111519; }
+button, input, select { font: inherit; }
+.app-shell { height: 100vh; overflow-x: hidden; overflow-y: auto; background: #12161a; scrollbar-color: #34433f #12161a; scrollbar-width: thin; }
+.compact-header { display: flex; align-items: center; justify-content: space-between; padding: 17px 18px 7px; }
+.compact-header h1 { margin: 0; color: #f4f6f5; font-size: 16px; letter-spacing: -.02em; }
+.compact-header b { padding: 4px 9px; border-radius: 6px; color: #43b99d; background: #182925; font-size: 10px; letter-spacing: .08em; }
+.header-actions { display: flex; align-items: center; gap: 7px; }
+.header-actions button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid #2a3439; border-radius: 7px; color: #849198; background: #171c21; cursor: pointer; }
+.header-actions button:hover { border-color: #438f7e; color: #55bca5; background: #18231f; }
+.workspace { display: grid; gap: 9px; width: min(620px, 100%); margin: 0 auto; padding: 5px 18px 15px; }
+
+.workflow { display: grid; }
+.workflow-form { display: contents; }
+.workflow-step { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; padding: 7px 0 8px; }
+.workflow-step:not(.capture-step)::after { position: absolute; top: 44px; bottom: -2px; left: 14px; width: 1px; content: ""; background: #2b383a; }
+.step-number { z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #349c87; border-radius: 50%; color: #57cdb2; background: #121a1b; font-size: 13px; }
+.workflow-step.done .step-number, .capture-step .step-number { border-color: #4eaa94; color: #0d2420; background: #50aa94; font-weight: 900; }
+.step-body { display: grid; gap: 7px; min-width: 0; }
+.step-label { color: #8d9ca8; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.step-body > input, .step-body > select, .path-control input, .position-control input { width: 100%; height: 36px; min-width: 0; padding: 0 10px; border: 1px solid #2a323a; border-radius: 8px; outline: none; color: #edf1f0; background: #15191f; transition: border-color .15s, box-shadow .15s; }
+.step-body > input:focus, .step-body > select:focus, .position-control input:focus { border-color: #419d89; box-shadow: 0 0 0 3px rgba(65, 157, 137, .09); }
+.step-body input::placeholder { color: #465158; }
+.step-body > input[type="url"]:placeholder-shown { border-color: #3b3434; }
+.step-body select:disabled { opacity: .65; }
+.path-control { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; }
+.path-control input { overflow: hidden; color: #bcc8c5; text-overflow: ellipsis; }
+.path-control button { display: grid; place-items: center; border: 1px solid #2b353b; border-radius: 8px; color: #47b99f; background: #171d21; cursor: pointer; }
+.path-control button:hover { border-color: #3d8f7f; }
+.position-control { display: grid; grid-template-columns: 58px 88px; align-items: center; gap: 10px; color: #90a0aa; font-size: 10px; }
+.position-control input { text-align: center; }
+.step-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 38px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 900; transition: filter .12s, transform .12s; }
+.step-button:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
+.step-button:disabled { cursor: not-allowed; opacity: .42; }
+.step-button.outline { border: 1px solid #30383f; color: #e9eeee; background: #1a1f25; }
+.step-button.capture { height: 39px; border: 1px solid #4ba58f; color: #071613; background: #50aa94; }
+
+.progress-card, .info-banner, .alert-card, .workspace-card { border: 1px solid #273036; border-radius: 9px; background: #171c21; }
+.progress-card { position: relative; display: grid; grid-template-columns: 24px 1fr; align-items: center; gap: 8px; padding: 11px 13px 14px; overflow: hidden; color: #54bda5; }
+.progress-card div:not(.progress-track) { display: grid; gap: 1px; }
+.progress-card div span { color: #738188; font-size: 8px; font-weight: 900; letter-spacing: .12em; }
+.progress-card strong { color: #e9eeee; font-size: 11px; }
+.progress-track { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; background: rgba(80, 170, 148, .12); }
+.progress-track span { display: block; width: 35%; height: 100%; background: #50aa94; animation: progress-slide 1.15s ease-in-out infinite; }
+.screenshot-checklist { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid #293238; border-radius: 8px; background: #171c21; }
+.screenshot-checklist div { display: flex; align-items: center; gap: 8px; color: #bdc6c4; font-size: 10px; }
+.screenshot-checklist b { width: 13px; font-size: 13px; line-height: 1; text-align: center; }
+.screenshot-checklist .saved b { color: #56bea6; }
+.screenshot-checklist .failed b { color: #ef7189; }
+.info-banner, .alert-card { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; color: #809098; }
+.info-banner p, .alert-card p { margin: 0; font-size: 10px; line-height: 1.5; }
+.alert-card { border-color: rgba(247, 91, 119, .32); color: #f06e86; background: #21171b; }
+.alert-card strong { color: #f38a9d; font-size: 11px; }
+.alert-card p { max-height: 90px; margin-top: 4px; overflow: auto; overflow-wrap: anywhere; }
+
+.workspace-card { padding: 13px; }
+.card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.card-heading > div > span { color: #708089; font-size: 8px; font-weight: 900; letter-spacing: .1em; }
+.card-heading h2, .result-title h2 { margin: 2px 0 0; color: #edf1f0; font-size: 13px; }
+.success-pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 999px; color: #5cc8af; background: #192a27; font-size: 9px; font-weight: 800; }
+.result-title { display: flex; align-items: flex-start; gap: 8px; color: #54bda5; }
+.result-title p { margin: 3px 0 0; color: #7d8b91; font-size: 10px; }
+.result-actions { display: flex; gap: 7px; margin-top: 11px; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 12px; border-radius: 7px; cursor: pointer; font-size: 10px; font-weight: 900; }
+.button:disabled { cursor: not-allowed; opacity: .45; }
+.button.primary { border: 1px solid #4ba58f; color: #071613; background: #50aa94; }
+.button.secondary { border: 1px solid #30383f; color: #dbe2e0; background: #1a1f25; }
+.file-path { margin: 9px 0 0; overflow: hidden; color: #66757c; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 10px; }
+.evidence-summary span { display: flex; align-items: center; justify-content: center; gap: 4px; height: 28px; border: 1px solid #28423c; border-radius: 6px; color: #58bea7; background: #17231f; font-size: 9px; font-weight: 800; }
+.evidence-summary .muted { color: #69767b; background: transparent; }
+.case-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin-bottom: 8px; }
+.case-tab { height: 31px; border: 1px solid #2d373c; border-radius: 6px; color: #7d8c92; background: #171d21; cursor: pointer; font-size: 9px; font-weight: 800; }
+.case-tab.active { border-color: #3f9985; color: #56c4ab; background: #182723; }
+.contact-checker { display: grid; gap: 6px; }
+.contact-checker > .button { width: 100%; }
+.abuse-contact { display: grid; gap: 2px; padding: 8px 9px; border: 1px solid #293a36; border-radius: 7px; background: #151f1d; overflow-wrap: anywhere; }
+.abuse-contact strong { color: #58bfa7; font-size: 9px; }
+.abuse-contact span, .status-message, .contact-error { color: #a5b1ae; font-size: 9px; }
+.abuse-contact.selectable { grid-template-columns: 17px minmax(0, 1fr); align-items: start; cursor: pointer; }
+.abuse-contact.selectable.selected { border-color: #3f8777; background: #172622; }
+.abuse-contact.selectable > input { width: 14px; height: 14px; margin: 1px 0 0; accent-color: #50aa94; }
+.contact-details { display: grid; gap: 3px; min-width: 0; }
+.contact-details small { color: #ef7189; font-size: 9px; line-height: 1.35; }
+.email-preview { display: grid; gap: 7px; padding: 9px; border: 1px solid #2d403b; border-radius: 7px; background: #141f1c; }
+.email-preview > span { color: #71827c; font-size: 8px; font-weight: 900; letter-spacing: .08em; }
+.email-preview > strong { color: #58bfa7; font-size: 10px; }
+.email-preview label { display: grid; gap: 4px; color: #899792; font-size: 9px; }
+.email-preview input, .email-preview textarea { width: 100%; padding: 7px 8px; border: 1px solid #2b3734; border-radius: 6px; outline: none; color: #cbd5d2; background: #111816; font-size: 9px; line-height: 1.45; resize: vertical; }
+.contact-error { margin: 0; color: #ef7a90; }
+.gmail-send-status { margin: 0; padding: 8px 9px; border: 1px solid #34413e; border-radius: 7px; color: #aab6b2; background: #171f1d; font-size: 9px; line-height: 1.45; }
+.gmail-send-status.monitoring { border-color: #35534c; color: #79b9aa; }
+.gmail-send-status.sent { border-color: #367b6b; color: #62cbb2; background: #16251f; }
+.gmail-send-status.unconfirmed { border-color: #65404a; color: #ef899b; background: #21181b; }
+.status-message { margin: 8px 0 0; }
+.app-footer { display: flex; justify-content: space-between; padding: 10px 20px 14px; border-top: 1px solid #21282d; color: #59666c; font-size: 8px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes progress-slide { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+
+@media (max-width: 430px) {
+  .workspace { padding-inline: 14px; }
+  .compact-header { padding-inline: 14px; }
+  .workflow-step { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+  .result-actions { flex-direction: column; }
+}
