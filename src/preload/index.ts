@@ -46,15 +46,32 @@ type AbuseContact = {
 }
 
 type GeneratedEmail = { subject: string; body: string }
+type DmcaPrefillResult = { filledFields: string[]; message: string }
+type AcidDomainResult = { domainNames: string[]; abuseEmails: string[] }
 type GmailSendStatus = { status: 'monitoring' | 'sent' | 'unconfirmed'; message: string }
+type AutomationTiming = {
+  captureMode: 'screen' | 'window'
+  browserStartupMs: number
+  searchSettleMs: number
+  visualEvidenceMs: number
+  ampSettleMs: number
+  gmailLoadMs: number
+  attachmentSettleMs: number
+  composeMaximizeMs: number
+  sentBeforeRefreshMs: number
+  sentAfterRefreshMs: number
+  sentMessageOpenMs: number
+}
 
 type ProgressUpdate = {
-  stage: 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'generatingReport' | 'preparingGmail'
+  stage: 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'analyzingDomain' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
   status: 'active' | 'complete'
 }
 
 const api = {
   listBrowsers: (): Promise<BrowserOption[]> => ipcRenderer.invoke('list-browsers'),
+  getAutomationTiming: (): Promise<AutomationTiming> => ipcRenderer.invoke('get-automation-timing'),
+  saveAutomationTiming: (value: AutomationTiming): Promise<AutomationTiming> => ipcRenderer.invoke('save-automation-timing', value),
   selectSaveFolder: (): Promise<string | undefined> => ipcRenderer.invoke('select-save-folder'),
   resetWorkspace: (): Promise<boolean> => ipcRenderer.invoke('reset-workspace'),
   openControlledBrowser: (selection: BrowserSelection): Promise<boolean> =>
@@ -64,10 +81,13 @@ const api = {
   captureLandingPage: (): Promise<CaptureResult> => ipcRenderer.invoke('capture-landing-page'),
   findPhishingAbuseContacts: (): Promise<AbuseContact[]> =>
     ipcRenderer.invoke('find-phishing-abuse-contacts'),
-  generatePhishingEmail: (selectedProviders: string[]): Promise<GeneratedEmail> =>
-    ipcRenderer.invoke('generate-phishing-email', selectedProviders),
+  findAcidDomainNames: (): Promise<AcidDomainResult> => ipcRenderer.invoke('find-acid-domain-names'),
+  generatePhishingEmail: (selectedProviders: string[], customPrompt: string): Promise<GeneratedEmail> =>
+    ipcRenderer.invoke('generate-phishing-email', selectedProviders, customPrompt),
   openGmailDraft: (email: GeneratedEmail): Promise<boolean> =>
     ipcRenderer.invoke('open-gmail-draft', email),
+  openDmcaReport: (email: GeneratedEmail): Promise<DmcaPrefillResult> =>
+    ipcRenderer.invoke('open-dmca-report', email),
   onProgress: (callback: (update: ProgressUpdate) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: ProgressUpdate): void => callback(update)
     ipcRenderer.on('operation-progress', listener)

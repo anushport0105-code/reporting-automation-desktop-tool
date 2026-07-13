@@ -58,11 +58,26 @@ type AbuseContact = {
   value: string
   href: string
 }
+type AcidDomainResult = { domainNames: string[]; abuseEmails: string[] }
 
 type GeneratedEmail = { subject: string; body: string }
+type DmcaPrefillResult = { filledFields: string[]; message: string }
 type GmailSendStatus = { status: 'monitoring' | 'sent' | 'unconfirmed'; message: string }
+type AutomationTiming = {
+  captureMode: 'screen' | 'window'
+  browserStartupMs: number
+  searchSettleMs: number
+  visualEvidenceMs: number
+  ampSettleMs: number
+  gmailLoadMs: number
+  attachmentSettleMs: number
+  composeMaximizeMs: number
+  sentBeforeRefreshMs: number
+  sentAfterRefreshMs: number
+  sentMessageOpenMs: number
+}
 
-type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'generatingReport' | 'preparingGmail'
+type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'analyzingDomain' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
 type ProgressUpdate = { stage: ProgressStage; status: 'active' | 'complete' }
 type ProgressReporter = (update: ProgressUpdate) => void
 
@@ -75,13 +90,36 @@ const INDONESIA_GEOLOCATION = {
 }
 const AMP_TEST_URL = 'https://search.google.com/test/amp'
 const PHISH_REPORT_URL = 'https://phish.report/'
+const ACID_TOOL_URL = 'https://acidtool.com/'
 const OLLAMA_CHAT_URL = 'http://127.0.0.1:11434/api/chat'
 const OLLAMA_MODEL = 'qwen3:4b'
 const DEVELOPMENT_RECIPIENT = 'anushport0105@gmail.com'
+const GOOGLE_DMCA_FORM_URL = 'https://reportcontent.google.com/forms/dmca_search?ai0&pli=1'
+const DEVELOPMENT_DMCA_PROFILE = {
+  firstName: 'Test',
+  lastName: 'User',
+  companyName: 'Reporting Automation Development',
+  country: 'Indonesia',
+  originalWorkUrl: 'https://example.com/'
+} as const
 const PROVIDER_EMAILS: Record<string, string> = {
   cloudflare: 'abuse@cloudflare.com',
   godaddy: 'abuse@godaddy.com'
 }
+const DEFAULT_AUTOMATION_TIMING: AutomationTiming = {
+  captureMode: 'screen',
+  browserStartupMs: 1200,
+  searchSettleMs: 500,
+  visualEvidenceMs: 6000,
+  ampSettleMs: 5000,
+  gmailLoadMs: 2500,
+  attachmentSettleMs: 1000,
+  composeMaximizeMs: 700,
+  sentBeforeRefreshMs: 1500,
+  sentAfterRefreshMs: 2500,
+  sentMessageOpenMs: 1800
+}
+let automationTiming: AutomationTiming = { ...DEFAULT_AUTOMATION_TIMING }
 let controlledBrowser: Browser | undefined
 let controlledContext: BrowserContext | undefined
 let controlledPage: Page | undefined
@@ -90,6 +128,38 @@ let lastLandingUrl: string | undefined
 let controlledSelectionKey: string | undefined
 let controlledBrowserProcess: ChildProcess | undefined
 let gmailMonitorGeneration = 0
+
+function timingSettingsPath(): string {
+  return join(app.getPath('userData'), 'timing-settings.json')
+}
+
+function normalizeAutomationTiming(value: Partial<AutomationTiming>): AutomationTiming {
+  const result = { ...DEFAULT_AUTOMATION_TIMING }
+  result.captureMode = value.captureMode === 'window' ? 'window' : 'screen'
+  for (const key of Object.keys(DEFAULT_AUTOMATION_TIMING) as Array<keyof AutomationTiming>) {
+    if (key === 'captureMode') continue
+    const candidate = Number(value[key])
+    result[key] = (Number.isFinite(candidate)
+      ? Math.min(60000, Math.max(0, Math.round(candidate)))
+      : DEFAULT_AUTOMATION_TIMING[key]) as never
+  }
+  return result
+}
+
+async function loadAutomationTiming(): Promise<AutomationTiming> {
+  try {
+    automationTiming = normalizeAutomationTiming(JSON.parse(await readFile(timingSettingsPath(), 'utf8')))
+  } catch {
+    automationTiming = { ...DEFAULT_AUTOMATION_TIMING }
+  }
+  return automationTiming
+}
+
+async function saveAutomationTiming(value: Partial<AutomationTiming>): Promise<AutomationTiming> {
+  automationTiming = normalizeAutomationTiming(value)
+  await writeFile(timingSettingsPath(), JSON.stringify(automationTiming, null, 2), 'utf8')
+  return automationTiming
+}
 
 process.stdout?.on('error', (error: NodeJS.ErrnoException) => {
   if (error.code !== 'EPIPE') throw error
@@ -478,7 +548,7 @@ async function closeExistingBrowserProcess(browserId: string): Promise<void> {
     execFile('taskkill', ['/IM', imageName, '/T', '/F'], () => resolve())
   })
 
-  await new Promise((resolve) => setTimeout(resolve, 1200))
+  await new Promise((resolve) => setTimeout(resolve, automationTiming.browserStartupMs))
 }
 
 async function launchChromiumWithRemoteDebugging(
@@ -787,7 +857,7 @@ async function findResultBox(
 
   const result = resultLinks.nth(resultPosition - 1)
   await result.scrollIntoViewIfNeeded()
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(automationTiming.searchSettleMs)
 
   const handle = await result.elementHandle()
   const resultDetails = await handle?.evaluate((element) => {
@@ -917,7 +987,7 @@ async function waitForVisualEvidenceReady(page: Page): Promise<void> {
     )
     .catch(() => undefined)
 
-  await page.waitForTimeout(6000)
+  await page.waitForTimeout(automationTiming.visualEvidenceMs)
 }
 
 async function waitForPageReady(page: Page): Promise<void> {
@@ -927,6 +997,32 @@ async function waitForPageReady(page: Page): Promise<void> {
 }
 
 async function captureBrowserWindow(page: Page, screenshotPath: string): Promise<void> {
+  if (automationTiming.captureMode === 'window') {
+    const pageTitle = (await page.title().catch(() => '')).trim().toLowerCase()
+    const windowSources = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 2560, height: 1600 },
+      fetchWindowIcons: false
+    })
+    const candidates = windowSources.filter(
+      (source) => !source.thumbnail.isEmpty() && !/reporting automation/i.test(source.name)
+    )
+    const browserPattern = controlledSelectionKey?.startsWith('brave:')
+      ? /brave/i
+      : controlledSelectionKey?.startsWith('chrome:')
+        ? /chrome/i
+        : /brave|chrome|firefox/i
+    const selectedSource =
+      candidates.find((source) => pageTitle.length > 2 && source.name.toLowerCase().includes(pageTitle)) ||
+      candidates.find((source) => browserPattern.test(source.name))
+
+    if (!selectedSource) {
+      throw new Error('Could not find the controlled browser window. Keep it open and not minimized, then try again.')
+    }
+    await writeFile(screenshotPath, selectedSource.thumbnail.toPNG())
+    return
+  }
+
   await page.bringToFront()
   await page.waitForTimeout(350)
 
@@ -1020,7 +1116,7 @@ async function screenshotAmpTestedPageDrawer(page: Page, screenshotPath: string)
     }
   }
 
-  await page.waitForTimeout(5000)
+  await page.waitForTimeout(automationTiming.ampSettleMs)
 
   const drawerRect = await page
     .evaluate(() => {
@@ -1533,8 +1629,104 @@ async function findPhishingAbuseContacts(reportProgress?: ProgressReporter): Pro
   return uniqueContacts
 }
 
+async function findAcidDomainNames(reportProgress?: ProgressReporter): Promise<AcidDomainResult> {
+  const context = controlledContext
+  if (!context) throw new Error('Open the controlled browser before checking ACID Tool.')
+  if (!lastLandingUrl) throw new Error('Capture a Google search result before checking ACID Tool.')
+
+  reportProgress?.({ stage: 'analyzingDomain', status: 'active' })
+  const acidPage = await context.newPage()
+  await acidPage.goto(ACID_TOOL_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
+  const urlInput = acidPage.locator('#dns-abuse-input, input[name="domain"]').first()
+  await urlInput.waitFor({ state: 'visible', timeout: 20000 })
+  await urlInput.fill(lastLandingUrl)
+
+  const checkButton = acidPage
+    .getByRole('button', { name: /^check$/i })
+    .or(acidPage.locator('button:has-text("Check"), input[type="submit"][value*="Check" i]'))
+    .first()
+  await checkButton.waitFor({ state: 'visible', timeout: 15000 })
+  await acidPage
+    .waitForFunction(
+      () => {
+        const verification = document.querySelector<HTMLInputElement>('input[name="altcha"]')
+        return Boolean(verification?.value?.trim()) || /\bverified\b/i.test(document.body?.innerText ?? '')
+      },
+      undefined,
+      { timeout: 60000 }
+    )
+    .catch(() => undefined)
+  await checkButton.click()
+  await acidPage.bringToFront()
+
+  await acidPage.waitForTimeout(1500)
+  const verificationError = acidPage.locator('#dns-abuse-result').filter({ hasText: /complete the security verification/i })
+  if (await verificationError.isVisible().catch(() => false)) {
+    await acidPage
+      .waitForFunction(
+        () => {
+          const verification = document.querySelector<HTMLInputElement>('input[name="altcha"]')
+          return Boolean(verification?.value?.trim()) || /\bverified\b/i.test(document.body?.innerText ?? '')
+        },
+        undefined,
+        { timeout: 120000 }
+      )
+    await checkButton.click()
+  }
+
+  const resultContainer = acidPage.locator('#dns-abuse-result')
+  await resultContainer.locator('.result-card').first().waitFor({ state: 'attached', timeout: 120000 }).catch(async () => {
+    const resultText = await resultContainer.innerText().catch(() => '')
+    throw new Error(resultText.trim() || 'ACID Tool did not return results. Complete ALTCHA verification if shown, then try again.')
+  })
+  await acidPage.waitForTimeout(1000)
+
+  const extracted = await acidPage.evaluate(() => {
+    const domainNames: string[] = []
+    const abuseEmails: string[] = []
+    const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim()
+    const addDomain = (value: string): void => {
+      const cleaned = normalize(value).replace(/^domain\s+name\s*/i, '').split(/\s{2,}|\n/)[0].trim()
+      const match = cleaned.match(/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}/i)
+      if (match) domainNames.push(match[0].toLowerCase())
+    }
+    const addEmail = (value: string): void => {
+      const matches = value.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi) ?? []
+      abuseEmails.push(...matches.map((email) => email.toLowerCase()))
+    }
+
+    for (const row of Array.from(document.querySelectorAll('tr'))) {
+      const cells = Array.from(row.querySelectorAll('th, td')).map((cell) => normalize(cell.textContent ?? ''))
+      if (cells.length < 2) continue
+      if (/^domain\s+name:?$/i.test(cells[0])) addDomain(cells.slice(1).join(' '))
+      if (/^(?:registrar\s+)?abuse(?:\s+contact)?\s+email:?$/i.test(cells[0])) addEmail(cells.slice(1).join(' '))
+    }
+    for (const term of Array.from(document.querySelectorAll('dt'))) {
+      if (!/^domain\s+name:?$/i.test(normalize(term.textContent ?? ''))) continue
+      const description = term.nextElementSibling
+      if (description) addDomain(description.textContent ?? '')
+    }
+    for (const label of Array.from(document.querySelectorAll('strong, b, label'))) {
+      if (!/^domain\s+name:?$/i.test(normalize(label.textContent ?? ''))) continue
+      const container = label.parentElement
+      if (container) addDomain(container.textContent ?? '')
+    }
+    return {
+      domainNames: Array.from(new Set(domainNames)),
+      abuseEmails: Array.from(new Set(abuseEmails))
+    }
+  })
+
+  if (extracted.domainNames.length === 0 && extracted.abuseEmails.length === 0) {
+    throw new Error('ACID Tool completed, but no Domain Name or Abuse Email value was found in its results.')
+  }
+  reportProgress?.({ stage: 'analyzingDomain', status: 'complete' })
+  return extracted
+}
+
 async function generatePhishingEmail(
   selectedProviders: string[],
+  customPrompt = '',
   reportProgress?: ProgressReporter
 ): Promise<GeneratedEmail> {
   if (!lastLandingUrl || !lastSearchCapture) {
@@ -1574,7 +1766,7 @@ async function generatePhishingEmail(
           },
           {
             role: 'user',
-            content: `(PHISHING)\nABOVE URL'S SITE USING HARMFUL PHISHING METHODS AND ALSO USING COPY CONTENTS ITS VERY VERY DANGROUS FOR USERS (I HAVE FULL EVIDENCE), SO I WANT A LONG COPY-PASTE EMAIL FOR REPORTING. Mention applicable categories of law without inventing specific laws.\n\nReported URL: ${lastLandingUrl}\nPlatforms: ${eligibleProviders.join(', ')}\nAvailable evidence: ${evidenceSummary.join(', ') || 'Evidence screenshots captured by the reporting tool'}\n\nCreate one combined detailed email with a clear urgent subject and a professional body.`
+            content: `(PHISHING)\nABOVE URL'S SITE USING HARMFUL PHISHING METHODS AND ALSO USING COPY CONTENTS ITS VERY VERY DANGROUS FOR USERS (I HAVE FULL EVIDENCE), SO I WANT A LONG COPY-PASTE EMAIL FOR REPORTING. Mention applicable categories of law without inventing specific laws.\n\nReported URL: ${lastLandingUrl}\nPlatforms: ${eligibleProviders.join(', ')}\nAvailable evidence: ${evidenceSummary.join(', ') || 'Evidence screenshots captured by the reporting tool'}\n\nUser-provided writing instructions:\n${customPrompt.trim().slice(0, 8000) || 'No additional instructions.'}\n\nCreate one combined detailed email with a clear urgent subject and a professional body. Follow the user writing instructions only when they do not conflict with factual accuracy and the system rules.`
           }
         ]
       })
@@ -1619,6 +1811,163 @@ async function generatePhishingEmail(
   return { subject: generated.subject.trim(), body: generated.body.trim() }
 }
 
+async function fillFirstMatchingDmcaField(
+  page: Page,
+  fieldPattern: RegExp,
+  value: string
+): Promise<boolean> {
+  const controls = page.locator('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]), textarea')
+  const count = await controls.count()
+  for (const includeNearbyText of [false, true]) {
+    for (let index = 0; index < count; index += 1) {
+      const control = controls.nth(index)
+      if (!(await control.isVisible().catch(() => false))) continue
+      const contextText = await control.evaluate((element, includeNearby) => {
+      const ownText = [
+        element.getAttribute('aria-label'),
+        element.getAttribute('placeholder'),
+        element.getAttribute('name'),
+        element.getAttribute('id')
+      ].filter(Boolean).join(' ')
+      if (!includeNearby) return ownText.replace(/\s+/g, ' ').trim()
+      let parent: HTMLElement | null = element.parentElement
+      const nearby: string[] = []
+      for (let depth = 0; parent && depth < 2; depth += 1, parent = parent.parentElement) {
+        nearby.push(parent.innerText || '')
+      }
+      return `${ownText} ${nearby.join(' ')}`.replace(/\s+/g, ' ').trim()
+      }, includeNearbyText)
+      if (!fieldPattern.test(contextText)) continue
+      await control.fill(value)
+      return true
+    }
+  }
+  return false
+}
+
+async function openAndPrefillDmcaForm(
+  email: GeneratedEmail,
+  reportProgress?: ProgressReporter
+): Promise<DmcaPrefillResult> {
+  if (!controlledContext || !controlledBrowser?.isConnected()) {
+    throw new Error('Open the controlled browser before preparing the DMCA report.')
+  }
+  if (!lastLandingUrl) throw new Error('Capture a Google search result before preparing the DMCA report.')
+
+  reportProgress?.({ stage: 'preparingDmca', status: 'active' })
+  const previousDmcaPages = controlledContext.pages().filter((candidate) =>
+    candidate.url().startsWith('https://reportcontent.google.com/forms/dmca_search')
+  )
+  await Promise.all(previousDmcaPages.map((candidate) => candidate.close().catch(() => undefined)))
+  const page = await controlledContext.newPage()
+  await page.goto(START_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
+  await page.goto(GOOGLE_DMCA_FORM_URL, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.waitForTimeout(3000)
+
+  const pageText = await page.locator('body').innerText().catch(() => '')
+  if (/sign in to get started|continue with google/i.test(pageText)) {
+    await page.bringToFront()
+    throw new Error('Google requires sign-in before showing the DMCA form. Sign in using this controlled browser, then click Send DMCA Report again.')
+  }
+
+  const filledFields: string[] = []
+  const fillByAccessibleName = async (pattern: RegExp, value: string, label: string): Promise<void> => {
+    const field = page.getByLabel(pattern).first()
+    if (await field.isVisible().catch(() => false)) {
+      await field.fill(value)
+      filledFields.push(label)
+    }
+  }
+
+  await fillByAccessibleName(/first name|nama depan/i, DEVELOPMENT_DMCA_PROFILE.firstName, 'test first name')
+  await fillByAccessibleName(/last name|nama belakang/i, DEVELOPMENT_DMCA_PROFILE.lastName, 'test last name')
+  await fillByAccessibleName(/company name|nama perusahaan/i, DEVELOPMENT_DMCA_PROFILE.companyName, 'test company')
+
+  const selfOwner = page.getByRole('radio').filter({ hasText: /saya sendiri|myself/i }).first()
+  if (await selfOwner.isVisible().catch(() => false)) {
+    await selfOwner.click()
+    filledFields.push('copyright owner: self (test)')
+  }
+  const countryButton = page.getByRole('button').filter({ hasText: /pilih negara\/wilayah anda|select your country/i }).first()
+  if (await countryButton.isVisible().catch(() => false)) {
+    await countryButton.click()
+    const indonesiaOption = page.getByRole('option', { name: /^Indonesia$/i }).first()
+    await indonesiaOption.waitFor({ state: 'visible', timeout: 5000 })
+    await indonesiaOption.click()
+    filledFields.push('country: Indonesia')
+  }
+
+  const liveStreamYes = page.getByRole('radio').filter({ hasText: /^(?:radio_button_unchecked|radio_button_checked)?(?:ya|yes)$/i }).first()
+  if (await liveStreamYes.isVisible().catch(() => false)) {
+    await liveStreamYes.click()
+    filledFields.push('live stream: yes')
+  }
+
+  if (await fillFirstMatchingDmcaField(page, /e-?mail|email address/i, DEVELOPMENT_RECIPIENT)) {
+    filledFields.push('development email')
+  }
+  if (await fillFirstMatchingDmcaField(page, /(?:infring|unauthori[sz]ed|reported).{0,80}(?:url|location)|(?:url|location).{0,80}(?:infring|unauthori[sz]ed|reported)|masukkan url di sini|lokasi materi yang melanggar/i, lastLandingUrl)) {
+    filledFields.push('infringing URL')
+  }
+  if (await fillFirstMatchingDmcaField(page, /additional (?:information|details)|explain.{0,60}infring|description.{0,60}infring|why.{0,60}infring|masukkan deskripsi anda di sini|identifikasi dan jelaskan karya/i, `${email.subject}\n\n${email.body}`)) {
+    filledFields.push('infringement explanation')
+  }
+  if (await fillFirstMatchingDmcaField(page, /example.{0,80}(?:work|copyright)|where.{0,80}(?:see|view).{0,80}(?:work|example)|masukkan contoh anda di sini|di mana kami dapat melihat contoh karya/i, DEVELOPMENT_DMCA_PROFILE.originalWorkUrl)) {
+    filledFields.push('test original-work URL')
+  }
+
+  const confirmationCheckboxes = page.getByRole('checkbox')
+  const checkboxCount = Math.min(await confirmationCheckboxes.count(), 4)
+  let checkedCount = 0
+  for (let index = 0; index < checkboxCount; index += 1) {
+    const checkbox = confirmationCheckboxes.nth(index)
+    if (!(await checkbox.isVisible().catch(() => false))) continue
+    if ((await checkbox.getAttribute('aria-checked')) !== 'true') await checkbox.click()
+    checkedCount += 1
+  }
+  if (checkedCount > 0) filledFields.push(`${checkedCount} confirmation checkboxes`)
+
+  await fillByAccessibleName(
+    /signature|tanda tangan/i,
+    `${DEVELOPMENT_DMCA_PROFILE.firstName} ${DEVELOPMENT_DMCA_PROFILE.lastName}`,
+    'test full-name signature'
+  )
+
+  const signedDateButton = page.getByRole('button', { name: /signed on|ditandatangani pada tanggal/i }).first()
+  if (await signedDateButton.isVisible().catch(() => false)) {
+    await signedDateButton.click()
+    const today = new Date()
+    const day = today.getDate()
+    const year = today.getFullYear()
+    const englishMonth = today.toLocaleString('en-US', { month: 'long' })
+    const indonesianMonth = today.toLocaleString('id-ID', { month: 'long' })
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const todayPattern = new RegExp(
+      `^(?:${day} (?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${year}|(?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${day},? ${year})$`,
+      'i'
+    )
+    const todayButton = page.getByLabel(todayPattern).first()
+    if ((await todayButton.count()) > 0) {
+      await todayButton.scrollIntoViewIfNeeded()
+      await todayButton.waitFor({ state: 'visible', timeout: 5000 })
+      await todayButton.click()
+      filledFields.push('today\'s date')
+    } else {
+      await page.keyboard.press('Escape')
+    }
+  }
+
+  await page.bringToFront()
+  reportProgress?.({ stage: 'preparingDmca', status: 'complete' })
+  if (filledFields.length === 0) {
+    throw new Error('The Google DMCA form opened, but its current fields did not match the automation. Complete the form manually and check the Activity Log.')
+  }
+  return {
+    filledFields,
+    message: `DEVELOPMENT TEST DATA ONLY. DMCA form opened and filled: ${filledFields.join(', ')}. CAPTCHA and Submit were intentionally left untouched. Replace and verify all dummy values and legal declarations before any real submission.`
+  }
+}
+
 async function maximizeGmailCompose(page: Page): Promise<void> {
   const maximizeButton = page
     .locator(
@@ -1634,15 +1983,15 @@ async function maximizeGmailCompose(page: Page): Promise<void> {
     .last()
     .waitFor({ state: 'visible', timeout: 10000 })
     .catch(() => undefined)
-  await page.waitForTimeout(700)
+  await page.waitForTimeout(automationTiming.composeMaximizeMs)
 }
 
 async function openNewestSentMessage(page: Page, subject: string): Promise<void> {
   const sentUrl = 'https://mail.google.com/mail/u/0/#sent'
   await page.goto(sentUrl, { waitUntil: 'domcontentloaded', timeout: 45000 })
-  await page.waitForTimeout(1500)
+  await page.waitForTimeout(automationTiming.sentBeforeRefreshMs)
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 })
-  await page.waitForTimeout(2500)
+  await page.waitForTimeout(automationTiming.sentAfterRefreshMs)
 
   const firstSentRow = page.locator('tr.zA:visible, tr[role="main"]:visible').first()
   await firstSentRow.waitFor({ state: 'visible', timeout: 30000 })
@@ -1659,7 +2008,7 @@ async function openNewestSentMessage(page: Page, subject: string): Promise<void>
     .locator('[role="main"], h2, [data-thread-id]')
     .first()
     .waitFor({ state: 'visible', timeout: 15000 })
-  await page.waitForTimeout(1800)
+  await page.waitForTimeout(automationTiming.sentMessageOpenMs)
 }
 
 function monitorGmailSend(
@@ -1737,7 +2086,7 @@ async function openGmailDraft(
   const gmailPage = await context.newPage()
   await gmailPage.goto('https://www.google.com', { waitUntil: 'domcontentloaded', timeout: 20000 })
   await gmailPage.goto('https://mail.google.com/mail/u/0/#inbox', { waitUntil: 'domcontentloaded', timeout: 45000 })
-  await gmailPage.waitForTimeout(2500)
+  await gmailPage.waitForTimeout(automationTiming.gmailLoadMs)
 
   if (/accounts\.google\.com|\/signin/i.test(gmailPage.url())) {
     await gmailPage.bringToFront()
@@ -1783,7 +2132,7 @@ async function openGmailDraft(
     .first()
     .waitFor({ state: 'hidden', timeout: 60000 })
     .catch(() => undefined)
-  await gmailPage.waitForTimeout(1000)
+  await gmailPage.waitForTimeout(automationTiming.attachmentSettleMs)
   await maximizeGmailCompose(gmailPage)
   await gmailPage.bringToFront()
   await captureBrowserWindow(gmailPage, join(evidenceFolder, '4.png'))
@@ -1794,6 +2143,7 @@ async function openGmailDraft(
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.reportingautomation.desktoptool')
+  void loadAutomationTiming()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -1808,6 +2158,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle('list-browsers', async () => {
     return listBrowsers()
+  })
+
+  ipcMain.handle('get-automation-timing', async () => loadAutomationTiming())
+
+  ipcMain.handle('save-automation-timing', async (_, value: Partial<AutomationTiming>) => {
+    return saveAutomationTiming(value)
   })
 
   ipcMain.handle('select-save-folder', async () => {
@@ -1838,8 +2194,12 @@ app.whenReady().then(() => {
     return findPhishingAbuseContacts((update) => event.sender.send('operation-progress', update))
   })
 
-  ipcMain.handle('generate-phishing-email', async (event, selectedProviders: string[]) => {
-    return generatePhishingEmail(selectedProviders, (update) => event.sender.send('operation-progress', update))
+  ipcMain.handle('find-acid-domain-names', async (event) => {
+    return findAcidDomainNames((update) => event.sender.send('operation-progress', update))
+  })
+
+  ipcMain.handle('generate-phishing-email', async (event, selectedProviders: string[], customPrompt: string) => {
+    return generatePhishingEmail(selectedProviders, customPrompt, (update) => event.sender.send('operation-progress', update))
   })
 
   ipcMain.handle('open-gmail-draft', async (event, email: GeneratedEmail) => {
@@ -1850,6 +2210,10 @@ app.whenReady().then(() => {
         if (!event.sender.isDestroyed()) event.sender.send('gmail-send-status', update)
       }
     )
+  })
+
+  ipcMain.handle('open-dmca-report', async (event, email: GeneratedEmail) => {
+    return openAndPrefillDmcaForm(email, (update) => event.sender.send('operation-progress', update))
   })
 
   ipcMain.handle('open-folder', async (_, folderPath: string) => {
