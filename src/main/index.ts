@@ -90,6 +90,7 @@ const AMP_TEST_URL = 'https://search.google.com/test/amp'
 const PHISH_REPORT_URL = 'https://phish.report/'
 const OLLAMA_CHAT_URL = 'http://127.0.0.1:11434/api/chat'
 const OLLAMA_MODEL = 'qwen3:4b'
+const OLLAMA_KEEP_ALIVE = '30m'
 const DEVELOPMENT_RECIPIENT = 'anushport0105@gmail.com'
 const GOOGLE_DMCA_FORM_URL = 'https://reportcontent.google.com/forms/dmca_search?ai0&pli=1'
 const DEVELOPMENT_DMCA_PROFILE = {
@@ -1626,6 +1627,30 @@ async function findPhishingAbuseContacts(reportProgress?: ProgressReporter): Pro
   return uniqueContacts
 }
 
+async function warmOllamaModel(): Promise<void> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 120000)
+  try {
+    await fetch(OLLAMA_CHAT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        stream: false,
+        think: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        options: { num_predict: 1 },
+        messages: [{ role: 'user', content: 'Reply with {}. /no_think' }]
+      })
+    })
+  } catch {
+    // Ollama is optional at startup; generation displays an actionable error if it is unavailable.
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function generatePhishingEmail(
   selectedProviders: string[],
   customPrompt = '',
@@ -1640,6 +1665,10 @@ async function generatePhishingEmail(
   if (eligibleProviders.length === 0) {
     throw new Error('Select at least one platform with a configured email address.')
   }
+  const userInstructions = customPrompt.trim().slice(0, 8000)
+  if (!userInstructions) {
+    throw new Error('Enter a content-generation prompt before generating.')
+  }
 
   const evidenceFiles = await readdir(lastSearchCapture.folderPath).catch(() => [])
   const evidenceSummary = [
@@ -1647,6 +1676,8 @@ async function generatePhishingEmail(
     evidenceFiles.includes('2.png') ? 'Landing Page screenshot' : undefined,
     evidenceFiles.includes('3.png') ? 'AMP Result screenshot' : undefined
   ].filter(Boolean)
+  const systemPrompt = 'Execute the user instruction exactly; do not repeat, quote, paraphrase, or explain the instruction itself. Return only JSON with string fields subject and body. Put the requested main result in body and provide a concise relevant subject. Do not add requirements, length limits, report structures, or claims that the user did not request. Use the supplied case context only when it is relevant to the instruction.'
+  const generationPrompt = `Instruction to execute:\n${userInstructions}\n\nAvailable case context:\nReported URL: ${lastLandingUrl}\nPlatforms: ${eligibleProviders.join(', ')}\nAvailable evidence: ${evidenceSummary.join(', ') || 'Evidence screenshots captured by the reporting tool'}\n\nPerform the instruction now. Do not echo the instruction. Return the result in the subject and body JSON fields.\n\n/no_think`
 
   reportProgress?.({ stage: 'generatingReport', status: 'active' })
   const controller = new AbortController()
@@ -1660,15 +1691,28 @@ async function generatePhishingEmail(
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         stream: false,
-        format: 'json',
+        think: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        format: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string' },
+            body: { type: 'string' }
+          },
+          required: ['subject', 'body']
+        },
+        options: {
+          num_predict: 700,
+          temperature: 0.3
+        },
         messages: [
           {
             role: 'system',
-            content: 'You write professional phishing abuse reports. Return only JSON with string fields subject and body. Use factual language. Do not invent victims, losses, organizations, evidence, jurisdictions, statutes, or legal conclusions. Refer only generally to applicable anti-fraud, cybercrime, consumer-protection, impersonation, copyright, and trademark laws. Ask the recipient to investigate and take appropriate action.'
+            content: systemPrompt
           },
           {
             role: 'user',
-            content: `(PHISHING)\nABOVE URL'S SITE USING HARMFUL PHISHING METHODS AND ALSO USING COPY CONTENTS ITS VERY VERY DANGROUS FOR USERS (I HAVE FULL EVIDENCE), SO I WANT A LONG COPY-PASTE EMAIL FOR REPORTING. Mention applicable categories of law without inventing specific laws.\n\nReported URL: ${lastLandingUrl}\nPlatforms: ${eligibleProviders.join(', ')}\nAvailable evidence: ${evidenceSummary.join(', ') || 'Evidence screenshots captured by the reporting tool'}\n\nUser-provided writing instructions:\n${customPrompt.trim().slice(0, 8000) || 'No additional instructions.'}\n\nCreate one combined detailed email with a clear urgent subject and a professional body. Follow the user writing instructions only when they do not conflict with factual accuracy and the system rules.`
+            content: generationPrompt
           }
         ]
       })
@@ -1697,20 +1741,57 @@ async function generatePhishingEmail(
     generated = JSON.parse(content) as Partial<GeneratedEmail>
   } catch {
     const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('Ollama returned an invalid response. Generate the content again.')
-    try {
-      generated = JSON.parse(jsonMatch[0]) as Partial<GeneratedEmail>
-    } catch {
-      throw new Error('Ollama returned malformed JSON. Generate the content again.')
+    if (!jsonMatch) {
+      if (content) {
+        generated = { subject: content, body: content }
+      } else {
+        throw new Error('Ollama returned an invalid response. Generate the content again.')
+      }
+    } else {
+      try {
+        generated = JSON.parse(jsonMatch[0]) as Partial<GeneratedEmail>
+      } catch {
+        if (content) {
+          generated = { subject: content, body: content }
+        } else {
+          throw new Error('Ollama returned malformed JSON. Generate the content again.')
+        }
+      }
     }
   }
 
-  if (!generated.subject?.trim() || !generated.body?.trim()) {
-    throw new Error('Ollama did not return both an email subject and body. Generate the content again.')
+  const unwrapGeneratedField = (value: string | undefined, field: 'subject' | 'body'): string | undefined => {
+    let current = value?.trim()
+    for (let depth = 0; current && depth < 3; depth += 1) {
+      const fenced = current.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+      if (!fenced.startsWith('{')) return current
+      try {
+        const nested = JSON.parse(fenced) as Record<string, unknown>
+        const exact = nested[field]
+        const alternate = nested[field === 'subject' ? 'Subject' : 'Body']
+        const next = typeof exact === 'string' ? exact : typeof alternate === 'string' ? alternate : undefined
+        if (!next) return current
+        current = next.trim()
+      } catch {
+        return current
+      }
+    }
+    return current
+  }
+  const firstTextValue = Object.values(generated).find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0
+  )?.trim()
+  const subject = unwrapGeneratedField(generated.subject, 'subject') || firstTextValue
+  const body = unwrapGeneratedField(generated.body, 'body') || firstTextValue
+  if (!subject || !body) {
+    throw new Error('Ollama did not return usable content for the prompt. Generate the content again.')
+  }
+  if (body.toLocaleLowerCase() === userInstructions.toLocaleLowerCase()) {
+    throw new Error('Ollama repeated the prompt instead of executing it. Reword the instruction and generate again.')
   }
 
   reportProgress?.({ stage: 'generatingReport', status: 'complete' })
-  return { subject: generated.subject.trim(), body: generated.body.trim() }
+  return { subject, body }
 }
 
 async function fillFirstMatchingDmcaField(
@@ -2079,6 +2160,7 @@ async function openGmailDraft(
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.reportingautomation.desktoptool')
   void loadAutomationTiming()
+  void warmOllamaModel()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

@@ -10,6 +10,7 @@ import {
   RefreshCw,
   RotateCw,
   Settings,
+  Shield,
   TriangleAlert
 } from 'lucide-react'
 
@@ -29,12 +30,15 @@ const initialForm: CapturePayload = {
   resultPosition: 1
 }
 
+const DEFAULT_CONTENT_PROMPT = 'Create a professional phishing abuse email with a clear urgent subject and a 280–320-word body. Describe the reported URL, deceptive or copied content, user risks, available evidence, and relevant general anti-fraud, cybercrime, consumer-protection, impersonation, copyright, and trademark concerns. Do not invent facts or specific legal violations. Ask the recipient to investigate and take appropriate action.'
+
 const caseTabs = ['Phishing', 'Cloaking', 'Stray Domain', 'Death fishing'] as const
 type CaseTab = (typeof caseTabs)[number]
 type ScreenshotState = { search: boolean | null; landing: boolean | null; amp: boolean | null }
 type ActivityLevel = 'info' | 'success' | 'warning' | 'error'
 type ActivityFilter = 'all' | 'warning' | 'error'
 type ActivityEntry = { id: number; time: string; level: ActivityLevel; stage: string; message: string }
+type WorkflowStage = 'setup' | 'capture' | 'content' | 'report'
 
 const progressLabels: Record<ProgressStage, string> = {
   openingBrave: 'Opening browser',
@@ -75,7 +79,7 @@ export function App(): JSX.Element {
   const [screenshotState, setScreenshotState] = useState<ScreenshotState>({ search: null, landing: null, amp: null })
   const [selectedProviders, setSelectedProviders] = useState<string[]>([])
   const [generatedEmail, setGeneratedEmail] = useState<GeneratedEmail | null>(null)
-  const [customPrompt, setCustomPrompt] = useState('')
+  const [customPrompt, setCustomPrompt] = useState(DEFAULT_CONTENT_PROMPT)
   const [contentCopied, setContentCopied] = useState(false)
   const [generatingEmail, setGeneratingEmail] = useState(false)
   const [preparingGmail, setPreparingGmail] = useState(false)
@@ -88,6 +92,7 @@ export function App(): JSX.Element {
   const [timingSettings, setTimingSettings] = useState<AutomationTiming | null>(null)
   const [showTimingSettings, setShowTimingSettings] = useState(false)
   const [savingTiming, setSavingTiming] = useState(false)
+  const [activeWorkflowStage, setActiveWorkflowStage] = useState<WorkflowStage>('setup')
   const activityId = useRef(0)
   const activityEnd = useRef<HTMLDivElement | null>(null)
   const addActivity = useCallback((level: ActivityLevel, stage: string, message: string): void => {
@@ -123,7 +128,13 @@ export function App(): JSX.Element {
   }, [activityFilter, activityLog])
 
   function scrollToWorkspaceSection(id: string): void {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const stages: Record<string, WorkflowStage> = {
+      'setup-section': 'setup',
+      'capture-section': 'capture',
+      'analysis-section': 'content',
+      'report-section': 'report'
+    }
+    setActiveWorkflowStage(stages[id] ?? 'setup')
   }
 
   useEffect(() => {
@@ -227,6 +238,20 @@ export function App(): JSX.Element {
     if (status.type === 'error') setActiveProgress(null)
   }, [status.type])
 
+  useEffect(() => {
+    if (!browserConnected || !form.savePath.trim() || !form.url.trim()) return
+    let validUrl = false
+    try {
+      const parsed = new URL(form.url)
+      validUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    } catch {
+      validUrl = false
+    }
+    if (!validUrl) return
+    const advance = window.setTimeout(() => setActiveWorkflowStage('capture'), 500)
+    return () => window.clearTimeout(advance)
+  }, [browserConnected, form.savePath, form.url])
+
   function updatePosition(event: ChangeEvent<HTMLInputElement>): void {
     setForm((current) => ({
       ...current,
@@ -262,8 +287,7 @@ export function App(): JSX.Element {
     localStorage.setItem('reportingAutomation.profile', profileId)
   }
 
-  function updateSelectedBrowser(event: ChangeEvent<HTMLSelectElement>): void {
-    const browserId = event.target.value
+  function selectBrowser(browserId: string): void {
     const browser = browsers.find((candidate) => candidate.id === browserId)
     const profileId = browser?.profiles[0]?.id ?? ''
     setSelectedBrowser(browserId)
@@ -298,7 +322,7 @@ export function App(): JSX.Element {
     setContactError('')
     setSelectedProviders([])
     setGeneratedEmail(null)
-    setCustomPrompt('')
+    setCustomPrompt(DEFAULT_CONTENT_PROMPT)
     setContentCopied(false)
     setEmailError('')
     setScreenshotState({ search: null, landing: null, amp: null })
@@ -340,6 +364,7 @@ export function App(): JSX.Element {
         amp: Boolean(landingResult.ampScreenshotPath)
       })
       setStatus({ type: 'landingSuccess', searchResult, landingResult })
+      setActiveWorkflowStage('content')
       addActivity('success', 'Evidence', `Saved Landing evidence: ${landingResult.screenshotPath}`)
       addActivity(
         landingResult.ampScreenshotPath ? 'success' : 'warning',
@@ -380,6 +405,7 @@ export function App(): JSX.Element {
     } finally {
       setBrowserConnected(false)
       setStatus({ type: 'idle' })
+      setActiveWorkflowStage('setup')
       setActiveProgress(null)
       setScreenshotState({ search: null, landing: null, amp: null })
       setSelectedCaseTab('Phishing')
@@ -388,7 +414,7 @@ export function App(): JSX.Element {
       setCheckingContacts(false)
       setSelectedProviders([])
       setGeneratedEmail(null)
-      setCustomPrompt('')
+      setCustomPrompt(DEFAULT_CONTENT_PROMPT)
       setContentCopied(false)
       setGmailSendStatus(null)
       setGeneratingEmail(false)
@@ -419,6 +445,7 @@ export function App(): JSX.Element {
     try {
       const generated = await window.reportingAutomation.generatePhishingEmail(eligibleProviders, customPrompt)
       setGeneratedEmail(generated)
+      setActiveWorkflowStage('report')
       setContentCopied(false)
       addActivity('success', 'Ollama', `Generated report content for: ${eligibleProviders.join(', ')}`)
     } catch (error) {
@@ -483,16 +510,9 @@ export function App(): JSX.Element {
           <button type="button" onClick={resetWorkspace} title="Reset workspace" aria-label="Reset workspace">
             <RefreshCw size={14} />
           </button>
-          <b>v0.5</b>
+          <b>v0.6</b>
         </div>
       </header>
-
-      <nav className="responsive-tabs" aria-label="Workflow navigation">
-        <button type="button" onClick={() => scrollToWorkspaceSection('setup-section')}><b>1</b><span>Setup</span></button>
-        <button type="button" onClick={() => scrollToWorkspaceSection('capture-section')}><b>2</b><span>Capture</span></button>
-        <button type="button" onClick={() => scrollToWorkspaceSection('analysis-section')}><b>3</b><span>Analyze</span></button>
-        <button type="button" onClick={() => scrollToWorkspaceSection('report-section')}><b>4</b><span>Report</span></button>
-      </nav>
 
       {showTimingSettings && timingSettings && (
         <div className="settings-backdrop" role="presentation" onMouseDown={(event) => {
@@ -540,43 +560,118 @@ export function App(): JSX.Element {
       )}
 
       <div className="workspace">
-        <nav className="workflow-nav" aria-label="Workflow steps">
-          <button className={selectedProfile ? 'complete active' : 'active'} type="button" onClick={() => scrollToWorkspaceSection('setup-section')}><b>1</b><span>Setup</span></button>
-          <button className={searchComplete ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('capture-section')}><b>2</b><span>Capture</span></button>
-          <button className={abuseContacts.length > 0 ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('analysis-section')}><b>3</b><span>Analyze</span></button>
-          <button className={generatedEmail ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('report-section')}><b>4</b><span>Report</span></button>
+        <nav className="workflow-canvas" aria-label="Workflow steps">
+          <div className="canvas-grid" aria-hidden="true" />
+          <button className={`workflow-node ${activeWorkflowStage === 'setup' ? 'active' : ''} ${browserConnected ? 'complete' : ''}`} type="button" onClick={() => setActiveWorkflowStage('setup')}>
+            <span className="node-port input" /><b>1</b><span><small>CONFIGURE</small>Setup</span><i>{browserConnected ? 'Ready' : 'Start'}</i><span className="node-port output" />
+          </button>
+          <span className={`node-connection ${browserConnected ? 'complete' : ''}`} aria-hidden="true" />
+          <button className={`workflow-node ${activeWorkflowStage === 'capture' ? 'active' : ''} ${searchComplete ? 'complete' : ''}`} type="button" onClick={() => setActiveWorkflowStage('capture')}>
+            <span className="node-port input" /><b>2</b><span><small>EVIDENCE</small>Capture</span><i>{searchComplete ? 'Saved' : 'Pending'}</i><span className="node-port output" />
+          </button>
+          <span className={`node-connection ${searchComplete ? 'complete' : ''}`} aria-hidden="true" />
+          <button className={`workflow-node ${activeWorkflowStage === 'content' ? 'active' : ''} ${generatedEmail ? 'complete' : ''}`} type="button" onClick={() => setActiveWorkflowStage('content')}>
+            <span className="node-port input" /><b>3</b><span><small>OLLAMA</small>Content Generation</span><i>{generatedEmail ? 'Generated' : 'Pending'}</i><span className="node-port output" />
+          </button>
+          <span className={`node-connection ${generatedEmail ? 'complete' : ''}`} aria-hidden="true" />
+          <button className={`workflow-node ${activeWorkflowStage === 'report' ? 'active' : ''}`} type="button" onClick={() => setActiveWorkflowStage('report')}>
+            <span className="node-port input" /><b>4</b><span><small>DELIVER</small>Report</span><i>{gmailSendStatus?.status === 'sent' ? 'Sent' : 'Pending'}</i><span className="node-port output" />
+          </button>
         </nav>
-        <div className="workspace-main">
+        <div className={`workspace-main stage-${activeWorkflowStage}`}>
         <div className="workflow" id="setup-section">
-          <section className={`workflow-step ${selectedProfile ? 'done' : ''}`}>
-            <span className="step-number">1</span>
-            <div className="step-body">
-              <span className="step-label">Choose browser &amp; profile</span>
-              <select value={selectedBrowser} onChange={updateSelectedBrowser} disabled={browserConnected} aria-label="Browser">
+          <section className="ops-console" aria-label="Security automation setup console">
+            <div className="case-config-panel">
+              <header><div><span>CASE CONFIGURATION</span><h2>Mission parameters</h2></div><i>{browserConnected ? 'ARMED' : 'STANDBY'}</i></header>
+              <p>Configure the evidence run. The execution graph mirrors these values automatically.</p>
+              <label><b>01</b><span>Browser</span><select value={selectedBrowser} onChange={(event) => selectBrowser(event.target.value)} disabled={browserConnected}>
                 {browsers.map((browser) => <option key={browser.id} value={browser.id}>{browser.name}</option>)}
-              </select>
+              </select></label>
+              <label><b>02</b><span>Profile</span><select value={selectedProfile} onChange={updateSelectedProfile} disabled={!activeBrowser || browserConnected}>
+                {activeProfiles.length === 0 && <option value="">No profiles found</option>}
+                {activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+              </select></label>
+              <label><b>03</b><span>Evidence folder</span><div className="ops-input-action"><input value={form.savePath} placeholder="Select destination" readOnly title={form.savePath} /><button type="button" onClick={selectSaveFolder} aria-label="Select save folder"><FolderOpen size={15} /></button></div></label>
+              <label><b>04</b><span>Target URL</span><input type="url" value={form.url} onChange={updateUrl} placeholder="https://target.example" /></label>
+              <label><b>05</b><span>Result position</span><input min={1} step={1} type="number" value={form.resultPosition} onChange={updatePosition} /></label>
+              <button className="initiate-ops" type="button" disabled={!selectedBrowser || !selectedProfile || status.type === 'opening' || status.type === 'capturing' || status.type === 'capturingLanding'} onClick={openBrowserWindow}>
+                {status.type === 'opening' ? <Loader2 className="spin" size={16} /> : <Shield size={16} />}
+                {status.type === 'opening' ? 'INITIALIZING…' : browserConnected ? 'FOCUS CONTROLLED BROWSER' : 'INITIATE WORKFLOW'}
+              </button>
+            </div>
+            <div className={`execution-graph ${status.type === 'opening' ? 'running' : ''}`}>
+              <div className="execution-grid" aria-hidden="true" />
+              <header><div><span>EXECUTION GRAPH</span><h2>Automated evidence route</h2></div><i>VIEW ONLY</i></header>
+              <div className="graph-status"><span className={browserConnected ? 'online' : ''} />{browserConnected ? 'CONTROL CHANNEL ONLINE' : 'AWAITING INITIALIZATION'}</div>
+              <div className="graph-route">
+                {[
+                  ['Browser', activeBrowser?.name || 'Not selected', Boolean(selectedBrowser)],
+                  ['Profile', activeProfiles.find((profile) => profile.id === selectedProfile)?.name || 'Not selected', Boolean(selectedProfile)],
+                  ['File Location', form.savePath ? 'Destination set' : 'Awaiting path', Boolean(form.savePath)],
+                  ['Target URL', form.url || 'Awaiting URL', Boolean(form.url)],
+                  ['Position', `Result ${form.resultPosition}`, form.resultPosition > 0]
+                ].map(([title, detail, ready], index) => <div className="graph-fragment" key={String(title)}>
+                  <article className={`${ready ? 'ready' : ''} ${index === 0 && status.type === 'opening' ? 'processing' : ''}`}><span className="graph-port input" /><small>0{index + 1} / NODE</small><strong>{title}</strong><em>{detail}</em><i>{ready ? 'READY' : 'PENDING'}</i><span className="graph-port output" /></article>
+                  {index < 4 && <span className={`graph-link ${ready ? 'ready' : ''}`}><b /></span>}
+                </div>)}
+              </div>
+              <footer><span>Graph mirrors configuration and animates during execution.</span><b>LOCAL EXECUTION · NO CLOUD STORAGE</b></footer>
+            </div>
+          </section>
+          <section className="browser-setup-canvas" aria-label="Browser setup workflow">
+            <div className="browser-canvas-grid" aria-hidden="true" />
+            <article className={`browser-config-node ${selectedBrowser ? 'configured' : ''}`}>
+              <span className="config-port input" />
+              <header><span>1</span><div><small>SELECT</small><strong>Choose Browser</strong></div><i>{selectedBrowser ? 'Configured' : 'Waiting'}</i></header>
+              <div className="browser-logo-options">
+                {browsers.map((browser) => (
+                  <button className={selectedBrowser === browser.id ? 'selected' : ''} type="button" key={browser.id}
+                    disabled={browserConnected} onClick={() => selectBrowser(browser.id)}>
+                    <span className={`browser-logo ${browser.id}`}>
+                      {browser.id === 'brave' ? <Shield size={27} /> : <Chrome size={29} />}
+                    </span>
+                    <strong>{browser.name}</strong>
+                    {selectedBrowser === browser.id && <Check size={13} />}
+                  </button>
+                ))}
+              </div>
+              <span className="config-port output" />
+            </article>
+
+            <span className={`browser-flow-link ${selectedBrowser ? 'ready' : ''}`} aria-hidden="true"><i>›</i></span>
+
+            <article className={`browser-config-node profile-node ${selectedProfile ? 'configured' : ''} ${status.type === 'opening' ? 'running' : ''}`}>
+              <span className="config-port input" />
+              <header><span>2</span><div><small>CONNECT</small><strong>Choose Profile</strong></div><i>{status.type === 'opening' ? 'Running' : selectedProfile ? 'Ready' : 'Waiting'}</i></header>
+              <div className="profile-symbol"><span /></div>
               <select id="profile" value={selectedProfile} onChange={updateSelectedProfile} disabled={!activeBrowser || browserConnected}>
                 {activeProfiles.length === 0 && <option value="">No profiles found</option>}
                 {activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
               </select>
-            </div>
-          </section>
+              <span className="config-port output" />
+            </article>
 
-          <section className={`workflow-step ${browserConnected ? 'done' : ''}`}>
-            <span className="step-number">2</span>
-            <div className="step-body">
-              <span className="step-label">Launch window</span>
-              <button className="step-button outline" type="button"
-                disabled={!selectedBrowser || !selectedProfile || status.type === 'opening' || status.type === 'capturing' || status.type === 'capturingLanding'}
-                onClick={openBrowserWindow}>
-                {status.type === 'opening' ? <Loader2 className="spin" size={16} /> : <Chrome size={16} />}
-                {browserConnected ? `Focus ${activeBrowser?.name ?? 'Browser'} Window` : `Open ${activeBrowser?.name ?? 'Browser'} Window`}
+            <span className={`browser-flow-link ${browserConnected ? 'ready' : ''}`} aria-hidden="true"><i>›</i></span>
+            <article className={`case-placeholder-node ${browserConnected ? 'ready' : ''}`}>
+              <span className="config-port input" /><b>›</b><span>{browserConnected ? 'Case Details Ready' : 'Next: Case Details'}</span>
+            </article>
+
+            <div className="initiate-browser-setup">
+              <button type="button" disabled={!selectedBrowser || !selectedProfile || status.type === 'opening' || status.type === 'capturing' || status.type === 'capturingLanding'} onClick={openBrowserWindow}>
+                {status.type === 'opening' ? <Loader2 className="spin" size={17} /> : <span>▶</span>}
+                {status.type === 'opening' ? 'Running setup…' : browserConnected ? 'Focus Browser' : 'Initiate'}
               </button>
+              <small>{browserConnected ? 'Browser setup completed' : 'Run browser setup'}</small>
+            </div>
+            <div className={`setup-execution-status ${status.type === 'opening' ? 'running' : browserConnected ? 'complete' : ''}`}>
+              <span>{status.type === 'opening' ? <Loader2 className="spin" size={12} /> : browserConnected ? <Check size={12} /> : '○'} Setup</span>
+              <b>•</b><span>{selectedBrowser ? 'Browser selected' : 'Choose browser'}</span>
+              <b>•</b><span>{browserConnected ? 'Profile connected' : selectedProfile ? 'Profile ready' : 'Choose profile'}</span>
             </div>
           </section>
 
           <form onSubmit={handleSubmit} className="workflow-form">
-            <section className={`workflow-step ${form.savePath && form.url ? 'done' : ''}`}>
+            {browserConnected ? <section className={`workflow-step case-details-node ${form.savePath && form.url ? 'done' : ''}`}>
               <span className="step-number">3</span>
               <div className="step-body">
                 <span className="step-label">Case details</span>
@@ -587,7 +682,7 @@ export function App(): JSX.Element {
                 <input type="url" value={form.url} onChange={updateUrl} placeholder="https://example.com" required />
                 <label className="position-control"><span>Position</span><input min={1} step={1} type="number" value={form.resultPosition} onChange={updatePosition} /></label>
               </div>
-            </section>
+            </section> : null}
 
             <section className={`workflow-step capture-step ${searchComplete ? 'done' : ''}`} id="capture-section">
               <span className="step-number">4</span>
@@ -701,7 +796,7 @@ export function App(): JSX.Element {
                           <input value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)}
                             placeholder="Type or paste your email-generation prompt…" aria-label="Content generation prompt" />
                           <button className="button primary" type="button" disabled={
-                            generatingEmail || preparingGmail || !abuseContacts.some((contact) => selectedProviders.includes(contact.provider) && contact.configuredEmail)
+                            generatingEmail || preparingGmail || !customPrompt.trim() || !abuseContacts.some((contact) => selectedProviders.includes(contact.provider) && contact.configuredEmail)
                           } onClick={generateEmailContent}>
                             {generatingEmail && <Loader2 className="spin" size={16} />}{generatingEmail ? 'Generating…' : 'Generate'}
                           </button>
@@ -721,7 +816,7 @@ export function App(): JSX.Element {
                         <label>Content<textarea value={generatedEmail.body} rows={12}
                           onChange={(event) => setGeneratedEmail((current) => current ? { ...current, body: event.target.value } : current)} /></label>
                         <div className="generated-actions">
-                          <button className="button secondary" type="button" disabled={generatingEmail || preparingGmail} onClick={generateEmailContent}>
+                          <button className="button secondary" type="button" disabled={generatingEmail || preparingGmail || !customPrompt.trim()} onClick={generateEmailContent}>
                             {generatingEmail ? <Loader2 className="spin" size={15} /> : <RotateCw size={15} />}{generatingEmail ? 'Regenerating…' : 'Regenerate'}
                           </button>
                           <button className="button primary" type="button" disabled={generatingEmail || preparingGmail || !generatedEmail.subject.trim() || !generatedEmail.body.trim()} onClick={sendMail}>

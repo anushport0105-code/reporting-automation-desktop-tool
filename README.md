@@ -1,6 +1,6 @@
 # Reporting Automation Desktop Tool
 
-Current release: **v0.5**
+Current release: **v0.6**
 
 Local Electron app for capturing phishing-site evidence screenshots for security and takedown reporting.
 
@@ -43,8 +43,8 @@ npm run dist:win
 
 The distributable files are written to:
 
-- `release/Reporting-Automation-Setup-0.5.0.exe` — installs the application and creates shortcuts.
-- `release/Reporting-Automation-Portable-0.5.0.exe` — runs directly without installation.
+- `release/Reporting-Automation-Setup-0.6.0.exe` — installs the application and creates shortcuts.
+- `release/Reporting-Automation-Portable-0.6.0.exe` — runs directly without installation.
 
 The recipient must use 64-bit Windows, install Brave Browser or Google Chrome, select one browser and a local profile in the app, and sign into Phish.Report in that profile. User profiles, cookies, logins, evidence, and API credentials are not included in the installer.
 

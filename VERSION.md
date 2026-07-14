@@ -1,5 +1,19 @@
 # Version History
 
+## v0.6 - LOCKED WORKING STATE
+
+Working state recorded on 2026-07-14. Preserve this behavior as the v0.6 baseline.
+
+- Retains the v0.5 evidence capture, Phish.Report contact extraction, local report generation, Gmail draft, send monitoring, and evidence workflow.
+- Removes the ACID Tool integration and uses Phish.Report alone for reporting-contact analysis.
+- Improves Google AMP Test submission and retries a clean test when the service reports a transient failure.
+- Adds Google DMCA form preparation with development test data while leaving CAPTCHA and final submission manual.
+- Selects the current signed date across Google's native select, combobox, dropdown, and calendar form variants, including English and Indonesian labels.
+- Includes updated workflow presentation, activity logging, timing controls, and responsive desktop styling.
+- Provides Windows installer and portable x64 distribution targets.
+
+Do not remove or change this baseline unless a later version is explicitly requested.
+
 ## v0.5 - LOCKED WORKING STATE
 
 Stable working state recorded on 2026-07-12. Preserve this exact behavior as the v0.5 baseline.
