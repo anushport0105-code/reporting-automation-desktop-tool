@@ -106,10 +106,6 @@ button, input, select { font: inherit; }
 .abuse-contact.selectable > input { width: 14px; height: 14px; margin: 1px 0 0; accent-color: #50aa94; }
 .contact-details { display: grid; gap: 3px; min-width: 0; }
 .contact-details small { color: #ef7189; font-size: 9px; line-height: 1.35; }
-.acid-domain-results { display: grid; gap: 4px; padding: 9px; border: 1px solid #355261; border-radius: 7px; background: #151f24; }
-.acid-domain-results > span { color: #7399aa; font-size: 8px; font-weight: 900; letter-spacing: .09em; }
-.acid-domain-results > strong { color: #69bfdc; font-size: 10px; overflow-wrap: anywhere; }
-.acid-domain-results > small { color: #ef899b; font-size: 8px; line-height: 1.4; }
 .content-generation-section { display: grid; gap: 8px; padding: 9px; border: 1px solid #2d403b; border-radius: 7px; background: #141f1c; }
 .content-generation-heading { color: #71827c; font-size: 8px; font-weight: 900; letter-spacing: .08em; }
 .prompt-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
@@ -177,4 +173,171 @@ button, input, select { font: inherit; }
   .timing-grid { grid-template-columns: 1fr; }
   .timing-grid label { grid-template-columns: minmax(0, 1fr) 94px; }
   .capture-mode-setting { grid-template-columns: 1fr; }
+}
+
+/* Responsive command-center shell */
+.responsive-tabs { display: none; }
+.workspace {
+  grid-template-columns: 142px minmax(560px, 1fr) minmax(310px, 370px);
+  align-items: stretch;
+  width: 100%;
+  max-width: 1720px;
+  padding: 7px 14px 12px;
+}
+.workflow-nav {
+  position: sticky;
+  top: 8px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: fit-content;
+  padding: 9px;
+  border: 1px solid #273036;
+  border-radius: 9px;
+  background: #151a1f;
+}
+.workflow-nav button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #859298;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.workflow-nav button:not(:last-child)::after {
+  position: absolute;
+  top: 43px;
+  left: 21px;
+  width: 1px;
+  height: 20px;
+  background: #34413f;
+  content: '';
+}
+.workflow-nav button:hover, .workflow-nav button.active {
+  border-color: #386d61;
+  color: #59c4ab;
+  background: #17231f;
+}
+.workflow-nav b {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #415057;
+  border-radius: 50%;
+  font-size: 11px;
+}
+.workflow-nav .complete b { border-color: #4aa88f; color: #071613; background: #54b99f; }
+.workflow-nav span { font-size: 10px; font-weight: 850; }
+.workspace-main { align-content: start; }
+.workflow, #analysis-section, #report-section, #capture-section { scroll-margin-top: 12px; }
+.activity-panel { top: 8px; max-height: calc(100vh - 102px); }
+.activity-panel.collapsed { grid-template-rows: auto; }
+.activity-panel.collapsed .activity-filters, .activity-panel.collapsed .activity-feed { display: none; }
+.activity-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 8px 10px 3px; }
+.activity-filters button {
+  min-height: 27px;
+  border: 1px solid #303a3f;
+  border-radius: 6px;
+  color: #8f9da1;
+  background: #181f23;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 850;
+}
+.activity-filters button.active { border-color: #3e907d; color: #5bc5ac; background: #182722; }
+.activity-filters button.warning.active { border-color: #80662f; color: #d7ae64; background: #242016; }
+.activity-filters button.error.active { border-color: #7a3d49; color: #ef7189; background: #25191d; }
+.activity-toggle { min-width: 38px; }
+.app-footer {
+  position: sticky;
+  z-index: 8;
+  bottom: 0;
+  align-items: center;
+  padding: 8px 18px;
+  background: rgba(18, 22, 26, .96);
+  backdrop-filter: blur(8px);
+}
+.app-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid #3d8d7b;
+  border-radius: 7px;
+  color: #58bea7;
+  background: #17241f;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+}
+.app-footer button:disabled { cursor: not-allowed; opacity: .35; }
+
+@media (max-width: 1180px) {
+  .workspace { grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); width: 100%; max-width: 1120px; }
+  .workflow-nav { display: none; }
+  .responsive-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    width: min(1120px, calc(100% - 28px));
+    margin: 2px auto 4px;
+    border: 1px solid #273036;
+    border-radius: 8px;
+    background: #151a1f;
+    overflow: hidden;
+  }
+  .responsive-tabs button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    border: 0;
+    border-right: 1px solid #273036;
+    color: #8c999f;
+    background: transparent;
+    cursor: pointer;
+    font-size: 9px;
+    font-weight: 850;
+  }
+  .responsive-tabs button:last-child { border-right: 0; }
+  .responsive-tabs button:hover { color: #5cc8af; background: #17231f; }
+  .responsive-tabs b { color: #58bea7; }
+}
+
+@media (max-width: 820px) {
+  .compact-header { position: sticky; z-index: 10; top: 0; padding: 11px 13px 8px; background: rgba(18, 22, 26, .97); backdrop-filter: blur(8px); }
+  .compact-header h1 { font-size: 14px; }
+  .responsive-tabs { position: sticky; z-index: 9; top: 46px; width: calc(100% - 20px); margin-bottom: 7px; }
+  .workspace { grid-template-columns: 1fr; width: 100%; max-width: 680px; padding: 0 10px 9px; }
+  .workflow { grid-template-columns: 1fr; }
+  .workflow-step { padding: 8px; }
+  .activity-panel { position: static; grid-row: auto; max-height: 330px; }
+  .activity-panel.collapsed { max-height: none; }
+  .activity-feed { max-height: 230px; }
+  .app-footer { padding: 7px 10px; }
+  .app-footer > span { display: none; }
+  .app-footer button { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .responsive-tabs { top: 45px; }
+  .responsive-tabs button { min-height: 35px; gap: 4px; font-size: 8px; }
+  .responsive-tabs button span { display: inline; }
+  .workflow-step { grid-template-columns: 24px minmax(0, 1fr); gap: 7px; }
+  .step-number { width: 24px; height: 24px; font-size: 11px; }
+  .prompt-composer { grid-template-columns: 1fr; }
+  .prompt-composer .button { width: 100%; }
+  .generated-actions { grid-template-columns: 1fr; }
+  .evidence-summary { grid-template-columns: 1fr; }
+  .activity-entry { grid-template-columns: 48px 42px minmax(0, 1fr); }
 }

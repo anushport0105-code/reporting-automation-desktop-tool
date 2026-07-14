@@ -48,7 +48,6 @@ declare global {
 
   type GeneratedEmail = { subject: string; body: string }
   type DmcaPrefillResult = { filledFields: string[]; message: string }
-  type AcidDomainResult = { domainNames: string[]; abuseEmails: string[] }
   type GmailSendStatus = { status: 'monitoring' | 'sent' | 'unconfirmed'; message: string }
   type AutomationTiming = {
     captureMode: 'screen' | 'window'
@@ -64,7 +63,7 @@ declare global {
     sentMessageOpenMs: number
   }
 
-  type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'analyzingDomain' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
+  type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
   type ProgressUpdate = { stage: ProgressStage; status: 'active' | 'complete' }
 
   interface Window {
@@ -78,7 +77,6 @@ declare global {
       captureGoogleResult: (payload: CapturePayload) => Promise<CaptureResult>
       captureLandingPage: () => Promise<CaptureResult>
       findPhishingAbuseContacts: () => Promise<AbuseContact[]>
-      findAcidDomainNames: () => Promise<AcidDomainResult>
       generatePhishingEmail: (selectedProviders: string[], customPrompt: string) => Promise<GeneratedEmail>
       openGmailDraft: (email: GeneratedEmail) => Promise<boolean>
       openDmcaReport: (email: GeneratedEmail) => Promise<DmcaPrefillResult>

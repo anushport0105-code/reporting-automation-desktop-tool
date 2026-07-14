@@ -58,8 +58,6 @@ type AbuseContact = {
   value: string
   href: string
 }
-type AcidDomainResult = { domainNames: string[]; abuseEmails: string[] }
-
 type GeneratedEmail = { subject: string; body: string }
 type DmcaPrefillResult = { filledFields: string[]; message: string }
 type GmailSendStatus = { status: 'monitoring' | 'sent' | 'unconfirmed'; message: string }
@@ -77,7 +75,7 @@ type AutomationTiming = {
   sentMessageOpenMs: number
 }
 
-type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'analyzingDomain' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
+type ProgressStage = 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
 type ProgressUpdate = { stage: ProgressStage; status: 'active' | 'complete' }
 type ProgressReporter = (update: ProgressUpdate) => void
 
@@ -90,7 +88,6 @@ const INDONESIA_GEOLOCATION = {
 }
 const AMP_TEST_URL = 'https://search.google.com/test/amp'
 const PHISH_REPORT_URL = 'https://phish.report/'
-const ACID_TOOL_URL = 'https://acidtool.com/'
 const OLLAMA_CHAT_URL = 'http://127.0.0.1:11434/api/chat'
 const OLLAMA_MODEL = 'qwen3:4b'
 const DEVELOPMENT_RECIPIENT = 'anushport0105@gmail.com'
@@ -1321,41 +1318,41 @@ async function runAmpTestCapture(
   const testScreenshotPath = join(folderPath, `.amp-test-${formatTimestampForFile(capturedAtDate)}.tmp.png`)
   const screenshotPath = evidenceScreenshotPath(folderPath, 'amp-page', evidenceId)
 
-  await page.goto(`${AMP_TEST_URL}?url=${encodeURIComponent(targetUrl)}`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 45000
-  })
-  await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined)
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined)
-  await page.waitForTimeout(3000)
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    await page.goto(AMP_TEST_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => undefined)
+    await page.waitForTimeout(2000)
 
-  const input = page.locator('input[type="url"], input[type="text"], textarea').first()
-  if (await input.isVisible({ timeout: 5000 }).catch(() => false)) {
-    const currentValue = await input.inputValue().catch(() => '')
-    if (!currentValue.includes(targetUrl)) {
-      await input.fill(targetUrl)
+    const input = page.locator('input[type="url"], input[type="text"], textarea').first()
+    await input.waitFor({ state: 'visible', timeout: 10000 })
+    await input.fill(targetUrl)
+
+    const testButtons = [
+      page.getByRole('button', { name: /test url/i }),
+      page.getByRole('button', { name: /run test/i }),
+      page.getByRole('button', { name: /^test$/i }),
+      page.locator('button:has-text("TEST URL")'),
+      page.locator('button:has-text("Test URL")')
+    ]
+    let submitted = false
+    for (const button of testButtons) {
+      const candidate = button.first()
+      if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
+        await candidate.click()
+        submitted = true
+        break
+      }
     }
+    if (!submitted) await input.press('Enter')
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => undefined)
+    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => undefined)
+    await page.waitForTimeout(5000)
+    const attemptText = await page.locator('body').innerText().catch(() => '')
+    const serviceFailed = /something went wrong|try again in a few hours/i.test(attemptText)
+    if (!serviceFailed) break
+    if (attempt === 2) throw new Error('Google AMP Test returned “Something went wrong” after two clean attempts. Try again later.')
   }
-
-  const testButtons = [
-    page.getByRole('button', { name: /test url/i }),
-    page.getByRole('button', { name: /run test/i }),
-    page.getByRole('button', { name: /^test$/i }),
-    page.locator('button:has-text("TEST URL")'),
-    page.locator('button:has-text("Test URL")')
-  ]
-
-  for (const button of testButtons) {
-    const candidate = button.first()
-    if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
-      await candidate.click()
-      break
-    }
-  }
-
-  await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => undefined)
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => undefined)
-  await page.waitForTimeout(5000)
   await page
     .waitForFunction(
       () => {
@@ -1629,101 +1626,6 @@ async function findPhishingAbuseContacts(reportProgress?: ProgressReporter): Pro
   return uniqueContacts
 }
 
-async function findAcidDomainNames(reportProgress?: ProgressReporter): Promise<AcidDomainResult> {
-  const context = controlledContext
-  if (!context) throw new Error('Open the controlled browser before checking ACID Tool.')
-  if (!lastLandingUrl) throw new Error('Capture a Google search result before checking ACID Tool.')
-
-  reportProgress?.({ stage: 'analyzingDomain', status: 'active' })
-  const acidPage = await context.newPage()
-  await acidPage.goto(ACID_TOOL_URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
-  const urlInput = acidPage.locator('#dns-abuse-input, input[name="domain"]').first()
-  await urlInput.waitFor({ state: 'visible', timeout: 20000 })
-  await urlInput.fill(lastLandingUrl)
-
-  const checkButton = acidPage
-    .getByRole('button', { name: /^check$/i })
-    .or(acidPage.locator('button:has-text("Check"), input[type="submit"][value*="Check" i]'))
-    .first()
-  await checkButton.waitFor({ state: 'visible', timeout: 15000 })
-  await acidPage
-    .waitForFunction(
-      () => {
-        const verification = document.querySelector<HTMLInputElement>('input[name="altcha"]')
-        return Boolean(verification?.value?.trim()) || /\bverified\b/i.test(document.body?.innerText ?? '')
-      },
-      undefined,
-      { timeout: 60000 }
-    )
-    .catch(() => undefined)
-  await checkButton.click()
-  await acidPage.bringToFront()
-
-  await acidPage.waitForTimeout(1500)
-  const verificationError = acidPage.locator('#dns-abuse-result').filter({ hasText: /complete the security verification/i })
-  if (await verificationError.isVisible().catch(() => false)) {
-    await acidPage
-      .waitForFunction(
-        () => {
-          const verification = document.querySelector<HTMLInputElement>('input[name="altcha"]')
-          return Boolean(verification?.value?.trim()) || /\bverified\b/i.test(document.body?.innerText ?? '')
-        },
-        undefined,
-        { timeout: 120000 }
-      )
-    await checkButton.click()
-  }
-
-  const resultContainer = acidPage.locator('#dns-abuse-result')
-  await resultContainer.locator('.result-card').first().waitFor({ state: 'attached', timeout: 120000 }).catch(async () => {
-    const resultText = await resultContainer.innerText().catch(() => '')
-    throw new Error(resultText.trim() || 'ACID Tool did not return results. Complete ALTCHA verification if shown, then try again.')
-  })
-  await acidPage.waitForTimeout(1000)
-
-  const extracted = await acidPage.evaluate(() => {
-    const domainNames: string[] = []
-    const abuseEmails: string[] = []
-    const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim()
-    const addDomain = (value: string): void => {
-      const cleaned = normalize(value).replace(/^domain\s+name\s*/i, '').split(/\s{2,}|\n/)[0].trim()
-      const match = cleaned.match(/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}/i)
-      if (match) domainNames.push(match[0].toLowerCase())
-    }
-    const addEmail = (value: string): void => {
-      const matches = value.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi) ?? []
-      abuseEmails.push(...matches.map((email) => email.toLowerCase()))
-    }
-
-    for (const row of Array.from(document.querySelectorAll('tr'))) {
-      const cells = Array.from(row.querySelectorAll('th, td')).map((cell) => normalize(cell.textContent ?? ''))
-      if (cells.length < 2) continue
-      if (/^domain\s+name:?$/i.test(cells[0])) addDomain(cells.slice(1).join(' '))
-      if (/^(?:registrar\s+)?abuse(?:\s+contact)?\s+email:?$/i.test(cells[0])) addEmail(cells.slice(1).join(' '))
-    }
-    for (const term of Array.from(document.querySelectorAll('dt'))) {
-      if (!/^domain\s+name:?$/i.test(normalize(term.textContent ?? ''))) continue
-      const description = term.nextElementSibling
-      if (description) addDomain(description.textContent ?? '')
-    }
-    for (const label of Array.from(document.querySelectorAll('strong, b, label'))) {
-      if (!/^domain\s+name:?$/i.test(normalize(label.textContent ?? ''))) continue
-      const container = label.parentElement
-      if (container) addDomain(container.textContent ?? '')
-    }
-    return {
-      domainNames: Array.from(new Set(domainNames)),
-      abuseEmails: Array.from(new Set(abuseEmails))
-    }
-  })
-
-  if (extracted.domainNames.length === 0 && extracted.abuseEmails.length === 0) {
-    throw new Error('ACID Tool completed, but no Domain Name or Abuse Email value was found in its results.')
-  }
-  reportProgress?.({ stage: 'analyzingDomain', status: 'complete' })
-  return extracted
-}
-
 async function generatePhishingEmail(
   selectedProviders: string[],
   customPrompt = '',
@@ -1933,9 +1835,17 @@ async function openAndPrefillDmcaForm(
     'test full-name signature'
   )
 
-  const signedDateButton = page.getByRole('button', { name: /signed on|ditandatangani pada tanggal/i }).first()
-  if (await signedDateButton.isVisible().catch(() => false)) {
-    await signedDateButton.click()
+  const signedDateField = page
+    .locator('fieldset')
+    .filter({ hasText: /signed on|ditandatangani pada tanggal/i })
+    .first()
+  const signedDateControl = signedDateField
+    .getByRole('combobox')
+    .or(signedDateField.getByRole('button'))
+    .or(page.getByRole('combobox', { name: /select a date|pilih tanggal|signed on|ditandatangani pada tanggal/i }))
+    .or(page.getByRole('button', { name: /select a date|pilih tanggal|signed on|ditandatangani pada tanggal/i }))
+    .first()
+  if (await signedDateControl.isVisible().catch(() => false)) {
     const today = new Date()
     const day = today.getDate()
     const year = today.getFullYear()
@@ -1943,14 +1853,39 @@ async function openAndPrefillDmcaForm(
     const indonesianMonth = today.toLocaleString('id-ID', { month: 'long' })
     const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const todayPattern = new RegExp(
-      `^(?:${day} (?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${year}|(?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${day},? ${year})$`,
+      `(?:${day} (?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${year}|(?:${escapeRegExp(englishMonth)}|${escapeRegExp(indonesianMonth)}) ${day},? ${year})`,
       'i'
     )
-    const todayButton = page.getByLabel(todayPattern).first()
-    if ((await todayButton.count()) > 0) {
-      await todayButton.scrollIntoViewIfNeeded()
-      await todayButton.waitFor({ state: 'visible', timeout: 5000 })
-      await todayButton.click()
+    const controlTag = await signedDateControl.evaluate((element) => element.tagName.toLowerCase())
+    let dateSelected = false
+    if (controlTag === 'select') {
+      dateSelected = await signedDateControl.evaluate((element, pattern) => {
+        const select = element as HTMLSelectElement
+        const matcher = new RegExp(pattern.source, pattern.flags)
+        const option = Array.from(select.options).find((candidate) => matcher.test(candidate.textContent ?? ''))
+        if (!option) return false
+        select.value = option.value
+        select.dispatchEvent(new Event('input', { bubbles: true }))
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }, { source: todayPattern.source, flags: todayPattern.flags })
+    } else {
+      await signedDateControl.click()
+      const calendar = page.getByRole('dialog').last()
+      const todayOption = page
+        .getByRole('option', { name: todayPattern })
+        .or(page.getByRole('menuitem', { name: todayPattern }))
+        .or(calendar.getByRole('button', { name: todayPattern }))
+        .or(calendar.locator('[aria-current="date"], [aria-current="true"]'))
+        .or(page.getByLabel(todayPattern))
+        .first()
+      if (await todayOption.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await todayOption.scrollIntoViewIfNeeded()
+        await todayOption.click()
+        dateSelected = true
+      }
+    }
+    if (dateSelected) {
       filledFields.push('today\'s date')
     } else {
       await page.keyboard.press('Escape')
@@ -2192,10 +2127,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle('find-phishing-abuse-contacts', async (event) => {
     return findPhishingAbuseContacts((update) => event.sender.send('operation-progress', update))
-  })
-
-  ipcMain.handle('find-acid-domain-names', async (event) => {
-    return findAcidDomainNames((update) => event.sender.send('operation-progress', update))
   })
 
   ipcMain.handle('generate-phishing-email', async (event, selectedProviders: string[], customPrompt: string) => {

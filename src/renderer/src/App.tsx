@@ -33,6 +33,7 @@ const caseTabs = ['Phishing', 'Cloaking', 'Stray Domain', 'Death fishing'] as co
 type CaseTab = (typeof caseTabs)[number]
 type ScreenshotState = { search: boolean | null; landing: boolean | null; amp: boolean | null }
 type ActivityLevel = 'info' | 'success' | 'warning' | 'error'
+type ActivityFilter = 'all' | 'warning' | 'error'
 type ActivityEntry = { id: number; time: string; level: ActivityLevel; stage: string; message: string }
 
 const progressLabels: Record<ProgressStage, string> = {
@@ -42,7 +43,6 @@ const progressLabels: Record<ProgressStage, string> = {
   checkingAmp: 'Checking AMP',
   analyzingUrl: 'Analyzing URL with Phish.Report',
   extractingContacts: 'Extracting reporting contacts',
-  analyzingDomain: 'Checking domain with ACID Tool',
   generatingReport: 'Generating report content',
   preparingGmail: 'Preparing Gmail draft',
   preparingDmca: 'Preparing Google DMCA report'
@@ -70,9 +70,6 @@ export function App(): JSX.Element {
   const [abuseContacts, setAbuseContacts] = useState<AbuseContact[]>([])
   const [contactError, setContactError] = useState('')
   const [checkingContacts, setCheckingContacts] = useState(false)
-  const [acidDomains, setAcidDomains] = useState<string[]>([])
-  const [acidAbuseEmails, setAcidAbuseEmails] = useState<string[]>([])
-  const [acidError, setAcidError] = useState('')
   const [activeProgress, setActiveProgress] = useState<ProgressStage | null>(null)
   const [browserConnected, setBrowserConnected] = useState(false)
   const [screenshotState, setScreenshotState] = useState<ScreenshotState>({ search: null, landing: null, amp: null })
@@ -86,6 +83,8 @@ export function App(): JSX.Element {
   const [emailError, setEmailError] = useState('')
   const [gmailSendStatus, setGmailSendStatus] = useState<GmailSendStatus | null>(null)
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([])
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
+  const [activityExpanded, setActivityExpanded] = useState(true)
   const [timingSettings, setTimingSettings] = useState<AutomationTiming | null>(null)
   const [showTimingSettings, setShowTimingSettings] = useState(false)
   const [savingTiming, setSavingTiming] = useState(false)
@@ -117,6 +116,15 @@ export function App(): JSX.Element {
       status.type !== 'opening'
     )
   }, [browserConnected, form, status.type])
+
+  const visibleActivityLog = useMemo(() => {
+    if (activityFilter === 'all') return activityLog
+    return activityLog.filter((entry) => entry.level === activityFilter)
+  }, [activityFilter, activityLog])
+
+  function scrollToWorkspaceSection(id: string): void {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   useEffect(() => {
     let mounted = true
@@ -190,10 +198,6 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (contactError) addActivity('error', 'Phish.Report', contactError)
   }, [addActivity, contactError])
-
-  useEffect(() => {
-    if (acidError) addActivity('error', 'ACID Tool', acidError)
-  }, [acidError, addActivity])
 
   useEffect(() => {
     if (emailError) addActivity('error', 'Email', emailError)
@@ -291,9 +295,6 @@ export function App(): JSX.Element {
     event.preventDefault()
     setSelectedCaseTab('Phishing')
     setAbuseContacts([])
-    setAcidDomains([])
-    setAcidAbuseEmails([])
-    setAcidError('')
     setContactError('')
     setSelectedProviders([])
     setGeneratedEmail(null)
@@ -356,33 +357,17 @@ export function App(): JSX.Element {
     setCheckingContacts(true)
     setContactError('')
     setAbuseContacts([])
-    setAcidDomains([])
-    setAcidAbuseEmails([])
-    setAcidError('')
     setSelectedProviders([])
     setGeneratedEmail(null)
     setEmailError('')
 
     try {
-      const [phishResult, acidResult] = await Promise.allSettled([
-        window.reportingAutomation.findPhishingAbuseContacts(),
-        window.reportingAutomation.findAcidDomainNames()
-      ])
-      if (phishResult.status === 'fulfilled') {
-        setAbuseContacts(phishResult.value)
-        addActivity('success', 'Phish.Report', `Extracted ${phishResult.value.length} reporting contact${phishResult.value.length === 1 ? '' : 's'}`)
-        if (phishResult.value.length === 0) setContactError('Phish.Report did not show any reporting websites or abuse email addresses.')
-      } else {
-        setContactError(phishResult.reason instanceof Error ? phishResult.reason.message : 'Could not check Phish.Report.')
-      }
-      if (acidResult.status === 'fulfilled') {
-        setAcidDomains(acidResult.value.domainNames)
-        setAcidAbuseEmails(acidResult.value.abuseEmails)
-        const values = [...acidResult.value.domainNames, ...acidResult.value.abuseEmails]
-        addActivity('success', 'ACID Tool', `Extracted: ${values.join(', ')}`)
-      } else {
-        setAcidError(acidResult.reason instanceof Error ? acidResult.reason.message : 'Could not check ACID Tool.')
-      }
+      const contacts = await window.reportingAutomation.findPhishingAbuseContacts()
+      setAbuseContacts(contacts)
+      addActivity('success', 'Phish.Report', `Extracted ${contacts.length} reporting contact${contacts.length === 1 ? '' : 's'}`)
+      if (contacts.length === 0) setContactError('Phish.Report did not show any reporting websites or abuse email addresses.')
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : 'Could not check Phish.Report.')
     } finally {
       setCheckingContacts(false)
       setActiveProgress(null)
@@ -399,9 +384,6 @@ export function App(): JSX.Element {
       setScreenshotState({ search: null, landing: null, amp: null })
       setSelectedCaseTab('Phishing')
       setAbuseContacts([])
-      setAcidDomains([])
-      setAcidAbuseEmails([])
-      setAcidError('')
       setContactError('')
       setCheckingContacts(false)
       setSelectedProviders([])
@@ -505,6 +487,13 @@ export function App(): JSX.Element {
         </div>
       </header>
 
+      <nav className="responsive-tabs" aria-label="Workflow navigation">
+        <button type="button" onClick={() => scrollToWorkspaceSection('setup-section')}><b>1</b><span>Setup</span></button>
+        <button type="button" onClick={() => scrollToWorkspaceSection('capture-section')}><b>2</b><span>Capture</span></button>
+        <button type="button" onClick={() => scrollToWorkspaceSection('analysis-section')}><b>3</b><span>Analyze</span></button>
+        <button type="button" onClick={() => scrollToWorkspaceSection('report-section')}><b>4</b><span>Report</span></button>
+      </nav>
+
       {showTimingSettings && timingSettings && (
         <div className="settings-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.currentTarget === event.target) setShowTimingSettings(false)
@@ -551,8 +540,14 @@ export function App(): JSX.Element {
       )}
 
       <div className="workspace">
+        <nav className="workflow-nav" aria-label="Workflow steps">
+          <button className={selectedProfile ? 'complete active' : 'active'} type="button" onClick={() => scrollToWorkspaceSection('setup-section')}><b>1</b><span>Setup</span></button>
+          <button className={searchComplete ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('capture-section')}><b>2</b><span>Capture</span></button>
+          <button className={abuseContacts.length > 0 ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('analysis-section')}><b>3</b><span>Analyze</span></button>
+          <button className={generatedEmail ? 'complete' : ''} type="button" onClick={() => scrollToWorkspaceSection('report-section')}><b>4</b><span>Report</span></button>
+        </nav>
         <div className="workspace-main">
-        <div className="workflow">
+        <div className="workflow" id="setup-section">
           <section className={`workflow-step ${selectedProfile ? 'done' : ''}`}>
             <span className="step-number">1</span>
             <div className="step-body">
@@ -594,7 +589,7 @@ export function App(): JSX.Element {
               </div>
             </section>
 
-            <section className={`workflow-step capture-step ${searchComplete ? 'done' : ''}`}>
+            <section className={`workflow-step capture-step ${searchComplete ? 'done' : ''}`} id="capture-section">
               <span className="step-number">4</span>
               <div className="step-body">
                 <span className="step-label">Capture</span>
@@ -667,7 +662,7 @@ export function App(): JSX.Element {
         )}
 
         {status.type === 'landingSuccess' && (
-          <section className="workspace-card reporting-card">
+          <section className="workspace-card reporting-card" id="analysis-section">
             <div className="card-heading"><div><span>STEP 3</span><h2>Reporting workflow</h2></div><span className="success-pill"><CheckCircle2 size={13} /> Evidence ready</span></div>
             <div className="evidence-summary">
               <span><CheckCircle2 size={14} /> Search</span><span><CheckCircle2 size={14} /> Landing</span>
@@ -681,7 +676,7 @@ export function App(): JSX.Element {
                 {selectedCaseTab === 'Phishing' && (
                   <div className="contact-checker">
                     <button className="button primary" type="button" disabled={checkingContacts} onClick={findAbuseContacts}>
-                      {checkingContacts ? <Loader2 className="spin" size={16} /> : <ExternalLink size={16} />}{checkingContacts ? 'Analyzing Phish.Report + ACID…' : 'Find contacts + domain'}
+                      {checkingContacts ? <Loader2 className="spin" size={16} /> : <ExternalLink size={16} />}{checkingContacts ? 'Analyzing Phish.Report…' : 'Find reporting contacts'}
                     </button>
                     {abuseContacts.map((contact) => {
                       const checked = selectedProviders.includes(contact.provider)
@@ -699,16 +694,8 @@ export function App(): JSX.Element {
                       )
                     })}
                     {contactError && <p className="contact-error">{contactError}</p>}
-                    {(acidDomains.length > 0 || acidAbuseEmails.length > 0 || acidError) && (
-                      <section className="acid-domain-results">
-                        <span>ACID TOOL RESULTS</span>
-                        {acidDomains.map((domain) => <strong key={domain}>{domain}</strong>)}
-                        {acidAbuseEmails.map((email) => <strong key={email}>{email}</strong>)}
-                        {acidError && <small>{acidError}</small>}
-                      </section>
-                    )}
                     {abuseContacts.length > 0 && (
-                      <section className="content-generation-section">
+                      <section className="content-generation-section" id="report-section">
                         <div className="content-generation-heading">CONTENT GENERATION</div>
                         <div className="prompt-composer">
                           <input value={customPrompt} onChange={(event) => setCustomPrompt(event.target.value)}
@@ -766,18 +753,24 @@ export function App(): JSX.Element {
         )}
         </div>
 
-        <aside className="activity-panel" aria-label="Backend activity log">
+        <aside className={`activity-panel ${activityExpanded ? 'expanded' : 'collapsed'}`} aria-label="Backend activity log">
           <div className="activity-header">
             <div><span>LIVE DIAGNOSTICS</span><h2>Activity log</h2></div>
             <div className="activity-actions">
               <button type="button" onClick={copyActivityLog} disabled={activityLog.length === 0}>Copy</button>
               <button type="button" onClick={() => setActivityLog([])} disabled={activityLog.length === 0}>Clear</button>
+              <button className="activity-toggle" type="button" onClick={() => setActivityExpanded((current) => !current)} aria-expanded={activityExpanded}>{activityExpanded ? 'Hide' : 'Show'}</button>
             </div>
           </div>
+          <div className="activity-filters" role="group" aria-label="Filter activity log">
+            <button className={activityFilter === 'all' ? 'active' : ''} type="button" onClick={() => setActivityFilter('all')}>All</button>
+            <button className={activityFilter === 'warning' ? 'active warning' : 'warning'} type="button" onClick={() => setActivityFilter('warning')}>Warnings</button>
+            <button className={activityFilter === 'error' ? 'active error' : 'error'} type="button" onClick={() => setActivityFilter('error')}>Errors</button>
+          </div>
           <div className="activity-feed" role="log" aria-live="polite">
-            {activityLog.length === 0 ? (
+            {visibleActivityLog.length === 0 ? (
               <p className="activity-empty">Backend operations, retries and errors will appear here in real time.</p>
-            ) : activityLog.map((entry) => (
+            ) : visibleActivityLog.map((entry) => (
               <div className={`activity-entry ${entry.level}`} key={entry.id}>
                 <time>{entry.time}</time><b>{entry.level}</b>
                 <div><strong>{entry.stage}</strong><p>{entry.message}</p></div>
@@ -787,7 +780,10 @@ export function App(): JSX.Element {
           </div>
         </aside>
       </div>
-      <footer className="app-footer"><span>Local evidence workspace</span><span>Images remain on this computer</span></footer>
+      <footer className="app-footer">
+        <span>Local evidence workspace · Images remain on this computer</span>
+        <button type="button" onClick={openFolder} disabled={status.type !== 'success' && status.type !== 'landingSuccess'}><FolderOpen size={14} />Open Evidence Folder</button>
+      </footer>
     </main>
   )
 }

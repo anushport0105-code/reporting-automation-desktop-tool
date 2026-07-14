@@ -47,7 +47,6 @@ type AbuseContact = {
 
 type GeneratedEmail = { subject: string; body: string }
 type DmcaPrefillResult = { filledFields: string[]; message: string }
-type AcidDomainResult = { domainNames: string[]; abuseEmails: string[] }
 type GmailSendStatus = { status: 'monitoring' | 'sent' | 'unconfirmed'; message: string }
 type AutomationTiming = {
   captureMode: 'screen' | 'window'
@@ -64,7 +63,7 @@ type AutomationTiming = {
 }
 
 type ProgressUpdate = {
-  stage: 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'analyzingDomain' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
+  stage: 'openingBrave' | 'searchEvidence' | 'landingPage' | 'checkingAmp' | 'analyzingUrl' | 'extractingContacts' | 'generatingReport' | 'preparingGmail' | 'preparingDmca'
   status: 'active' | 'complete'
 }
 
@@ -81,7 +80,6 @@ const api = {
   captureLandingPage: (): Promise<CaptureResult> => ipcRenderer.invoke('capture-landing-page'),
   findPhishingAbuseContacts: (): Promise<AbuseContact[]> =>
     ipcRenderer.invoke('find-phishing-abuse-contacts'),
-  findAcidDomainNames: (): Promise<AcidDomainResult> => ipcRenderer.invoke('find-acid-domain-names'),
   generatePhishingEmail: (selectedProviders: string[], customPrompt: string): Promise<GeneratedEmail> =>
     ipcRenderer.invoke('generate-phishing-email', selectedProviders, customPrompt),
   openGmailDraft: (email: GeneratedEmail): Promise<boolean> =>
